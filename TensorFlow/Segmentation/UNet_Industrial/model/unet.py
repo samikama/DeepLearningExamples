@@ -32,7 +32,7 @@ from utils import metrics
 
 from utils import image_processing
 
-from dllogger.logger import LOGGER
+from dllogger import Logger
 
 __all__ = ["UNet_v1"]
 
@@ -157,6 +157,14 @@ class UNet_v1(object):
             if "loss_fn_name" not in params.keys():
                 raise RuntimeError("Parameter `loss_fn_name` is missing...")
 
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            y_pred, y_pred_logits = self.build_model(
+                features, training=False, reuse=False, debug_verbosity=params["debug_verbosity"]
+            )
+
+            predictions = {'logits': y_pred}
+            return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+
         input_image, mask_image = features
 
         with tf.device("/gpu:0"):
@@ -174,10 +182,6 @@ class UNet_v1(object):
 
             all_trainable_vars = tf.reduce_sum([tf.reduce_prod(v.shape) for v in tf.trainable_variables()])
             tf.identity(all_trainable_vars, name='trainable_parameters_count_ref')
-
-            if mode == tf.estimator.ModeKeys.PREDICT:
-                predictions = {'logits': y_pred}
-                return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
             if mode == tf.estimator.ModeKeys.EVAL:
                 eval_metrics = dict()
@@ -210,6 +214,12 @@ class UNet_v1(object):
 
             labels = tf.cast(labels, tf.float32)
             labels_preds = tf.reduce_max(y_pred, axis=(1, 2, 3))
+
+            assert (
+                abs(labels_preds - tf.clip_by_value(labels_preds, 0, 1)) < 0.00001,
+                    "Clipping labels_preds introduces non-trivial loss."
+            )
+            labels_preds = tf.clip_by_value(labels_preds, 0, 1)
 
             with tf.variable_scope("Confusion_Matrix") as scope:
 
@@ -376,8 +386,8 @@ class UNet_v1(object):
 
                     if params["apply_manual_loss_scaling"]:
 
-                        if not hvd_utils.is_using_hvd() or hvd.local_rank() == 0:
-                            LOGGER.log("Applying manual Loss Scaling ...")
+                        # if not hvd_utils.is_using_hvd() or hvd.rank() == 0:
+                        #     Logger.log("Applying manual Loss Scaling ...")
 
                         loss_scale_manager = tf.contrib.mixed_precision.ExponentialUpdateLossScaleManager(
                             init_loss_scale=2**32,  # 4,294,967,296

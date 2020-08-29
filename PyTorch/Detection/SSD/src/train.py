@@ -1,3 +1,17 @@
+# Copyright (c) 2018-2019, NVIDIA CORPORATION. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from torch.autograd import Variable
 import torch
 import time
@@ -70,6 +84,7 @@ def benchmark_train_loop(model, loss_func, epoch, optim, train_dataloader, val_d
     result = torch.zeros((1,)).cuda()
     for i, data in enumerate(loop(train_dataloader)):
         if i >= args.benchmark_warmup:
+            torch.cuda.synchronize()
             start_time = time.time()
 
         img = data[0][0][0]
@@ -130,6 +145,7 @@ def benchmark_train_loop(model, loss_func, epoch, optim, train_dataloader, val_d
             break
 
         if i >= args.benchmark_warmup:
+            torch.cuda.synchronize()
             logger.update(args.batch_size, time.time() - start_time)
 
 
@@ -141,10 +157,12 @@ def benchmark_train_loop(model, loss_func, epoch, optim, train_dataloader, val_d
 
 
 
-def loop(dataloader):
+def loop(dataloader, reset=True):
     while True:
         for data in dataloader:
             yield data
+        if reset:
+            dataloader.reset()
 
 def benchmark_inference_loop(model, loss_func, epoch, optim, train_dataloader, val_dataloader, encoder, iteration, logger, args, mean, std):
     assert args.N_gpu == 1, 'Inference benchmark only on 1 gpu'
@@ -152,7 +170,7 @@ def benchmark_inference_loop(model, loss_func, epoch, optim, train_dataloader, v
     model.eval()
 
     i = -1
-    val_datas = loop(val_dataloader)
+    val_datas = loop(val_dataloader, False)
 
     while True:
         i += 1

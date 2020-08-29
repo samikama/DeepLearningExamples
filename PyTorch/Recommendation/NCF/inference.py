@@ -17,17 +17,12 @@
 import torch.jit
 import time
 from argparse import ArgumentParser
-
+import numpy as np
 import torch
 
 from neumf import NeuMF
 
-from logger.logger import LOGGER, timed_block, timed_function
-from logger.autologging import log_hardware, log_args
-
-from apex import amp
-
-LOGGER.model = 'ncf'
+import dllogger
 
 
 def parse_args():
@@ -45,20 +40,24 @@ def parse_args():
     parser.add_argument('--layers', nargs='+', type=int,
                         default=[256, 256, 128, 64],
                         help='Sizes of hidden layers for MLP')
-    parser.add_argument('--batch_size', default=1, type=int, help='Batch size for inference')
-    parser.add_argument('--num_batches', default=20, type=int,
+    parser.add_argument('--batch_sizes', default='1,4,16,64,256,1024,4096,16384,65536,262144,1048576', type=str,
+                        help='A list of comma-separated batch size values to benchmark')
+    parser.add_argument('--num_batches', default=200, type=int,
                         help='Number of batches for which to measure latency and throughput')
-    parser.add_argument('--opt_level', default='O2', type=str,
-                        help='Optimization level for Automatic Mixed Precision',
-                        choices=['O0', 'O2'])
+    parser.add_argument('--fp16', action='store_true', help='Cast the model to FP16 precision', default=False)
+    parser.add_argument('--log_path', default='log.json', type=str,
+                        help='Path for the JSON training log')
 
     return parser.parse_args()
 
 
 def main():
-    log_hardware()
     args = parse_args()
-    log_args(args)
+    dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
+                                                       filename=args.log_path),
+                            dllogger.StdOutBackend(verbosity=dllogger.Verbosity.VERBOSE)])
+
+    dllogger.log(data=vars(args), step='PARAMETER')
 
     model = NeuMF(nb_users=args.n_users, nb_items=args.n_items, mf_dim=args.factors,
                   mlp_layer_sizes=args.layers, dropout=args.dropout)
@@ -69,25 +68,35 @@ def main():
         state_dict = torch.load(args.load_checkpoint_path)
         model.load_state_dict(state_dict)
 
-    if args.opt_level == "O2":
-        model = amp.initialize(model, opt_level=args.opt_level,
-                               keep_batchnorm_fp32=False, loss_scale='dynamic')
+    if args.fp16:
+        model.half()
+    model.eval()
+    
+    batch_sizes = args.batch_sizes.split(',')
+    batch_sizes = [int(s) for s in batch_sizes]
 
-    users = torch.cuda.LongTensor(args.batch_size).random_(0, args.n_users)
-    items = torch.cuda.LongTensor(args.batch_size).random_(0, args.n_items)
+    result_data = {}
+    for batch_size in batch_sizes:
+        print('benchmarking batch size: ', batch_size)
+        users = torch.cuda.LongTensor(batch_size).random_(0, args.n_users)
+        items = torch.cuda.LongTensor(batch_size).random_(0, args.n_items)
 
-    latencies = []
-    for _ in range(args.num_batches):
-        torch.cuda.synchronize()
-        start = time.time()
-        predictions = model(users, items, sigmoid=True)
-        torch.cuda.synchronize()
-        latencies.append(time.time() - start)
+        latencies = []
+        for _ in range(args.num_batches):
+            torch.cuda.synchronize()
+            start = time.time()
+            _ = model(users, items, sigmoid=True)
+            torch.cuda.synchronize()
+            latencies.append(time.time() - start)
 
-    LOGGER.log(key='batch_size', value=args.batch_size)
-    LOGGER.log(key='best_inference_throughput', value=args.batch_size / min(latencies))
-    LOGGER.log(key='best_inference_latency', value=min(latencies))
-    LOGGER.log(key='inference_latencies', value=latencies)
+        result_data[f'batch_{batch_size}_mean_throughput'] = batch_size / np.mean(latencies)
+        result_data[f'batch_{batch_size}_mean_latency'] = np.mean(latencies)
+        result_data[f'batch_{batch_size}_p90_latency'] = np.percentile(latencies, 0.90)
+        result_data[f'batch_{batch_size}_p95_latency'] = np.percentile(latencies, 0.95)
+        result_data[f'batch_{batch_size}_p99_latency'] = np.percentile(latencies, 0.99)
+
+    dllogger.log(data=result_data, step=tuple())
+    dllogger.flush()
     return
 
 

@@ -65,8 +65,8 @@ if [ -f log ]; then
 fi
 
 if [ ! -f ${ZIP_PATH} ]; then
-    echo 'Dataset not found, downloading...'
-    ./download_dataset.sh ${DATASET_NAME} ${RAW_DATADIR}
+    echo "Dataset not found. Please download it from: https://grouplens.org/datasets/movielens/20m/ and put it in ${ZIP_PATH}"
+    exit 1
 fi
 
 if [ ! -f ${RATINGS_PATH} ]; then
@@ -85,6 +85,6 @@ else
 fi
 
 echo "Dataset $DATASET_NAME successfully prepared at: $CACHED_DATADIR\n"
-echo "You can now run the training with: python -m torch.distributed.launch --nproc_per_node=<number_of_GPUs> ncf.py --data ${CACHED_DATADIR}"
+echo "You can now run the training with: python -m torch.distributed.launch --nproc_per_node=<number_of_GPUs> --use_env ncf.py --data ${CACHED_DATADIR}"
 
 

@@ -1,7 +1,6 @@
 # coding=utf-8
+# Copyright (c) 2019 NVIDIA CORPORATION. All rights reserved.
 # Copyright 2018 The Google AI Language Team Authors and The HugginFace Inc. team.
-# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -13,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """BERT finetuning runner."""
 
 import argparse
@@ -34,6 +34,9 @@ from file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from modeling import BertForMultipleChoice, BertConfig, WEIGHTS_NAME, CONFIG_NAME
 from optimization import BertAdam, warmup_linear
 from tokenization import BertTokenizer
+
+torch._C._jit_set_profiling_mode(False)
+torch._C._jit_set_profiling_executor(False)
 
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
@@ -319,8 +322,13 @@ def main():
                         default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument('--fp16',
+                        default=False,
                         action='store_true',
-                        help="Whether to use 16-bit float precision instead of 32-bit")
+                        help="Mixed precision training")
+    parser.add_argument('--amp',
+                        default=False,
+                        action='store_true',
+                        help="Mixed precision training")
     parser.add_argument('--loss_scale',
                         type=float, default=0,
                         help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
@@ -328,7 +336,8 @@ def main():
                              "Positive power of 2: static loss scaling value.\n")
 
     args = parser.parse_args()
-
+    args.fp16 = args.fp16 or args.amp
+    
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
         n_gpu = torch.cuda.device_count()
@@ -405,7 +414,7 @@ def main():
         ]
     if args.fp16:
         try:
-            from apex.optimizers import FP16_Optimizer
+            from apex.contrib.optimizers import FP16_Optimizer
             from apex.optimizers import FusedAdam
         except ImportError:
             raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
