@@ -166,7 +166,6 @@ class Mask_Head_Model(tf.keras.Model):
 
     def __init__(
             self,
-            class_indices,
             num_classes=91,
             mrcnn_resolution=28,
             is_gpu_inference=False,
@@ -180,15 +179,12 @@ class Mask_Head_Model(tf.keras.Model):
         Args:
         roi_features: A ROI feature tensor of shape
           [batch_size, num_rois, height_l, width_l, num_filters].
-        class_indices: a Tensor of shape [batch_size, num_rois], indicating
-          which class the ROI is.
         num_classes: an integer for the number of classes.
         mrcnn_resolution: an integer that is the resolution of masks.
         is_gpu_inference: whether to build the model for GPU inference.
         """
         super(Mask_Head_Model, self).__init__(name=name, trainable=trainable, *args, **kwargs)
-
-        self._class_indices = class_indices
+        
         self._num_classes = num_classes
         self._mrcnn_resolution = mrcnn_resolution
         self._is_gpu_inference = is_gpu_inference
@@ -246,8 +242,10 @@ class Mask_Head_Model(tf.keras.Model):
             name='mask_fcn_logits'
         )
 
-    def call(self, inputs, **kwargs):
+    def call(self, inputs, class_indices,**kwargs):
         """
+        class_indices: a Tensor of shape [batch_size, num_rois], indicating
+          which class the ROI is.
         Returns:
         mask_outputs: a tensor with a shape of
           [batch_size, num_masks, mask_height, mask_width],
@@ -286,7 +284,7 @@ class Mask_Head_Model(tf.keras.Model):
                     tf.reshape(
                         tf.range(num_rois, dtype=indices_dtype),
                         [batch_size, num_rois, 1]
-                    ) * self._num_classes + tf.expand_dims(self._class_indices, axis=-1),
+                    ) * self._num_classes + tf.expand_dims(class_indices, axis=-1),
                     [batch_size, -1]
                 )
                 indices = tf.cast(indices, tf.int32)
@@ -313,7 +311,7 @@ class Mask_Head_Model(tf.keras.Model):
                         tf.ones([batch_size, 1], dtype=indices_dtype)
                 )
 
-                gather_indices = tf.stack([batch_indices, mask_indices, self._class_indices], axis=2)
+                gather_indices = tf.stack([batch_indices, mask_indices, class_indices], axis=2)
 
                 if self._is_gpu_inference:
                     gather_indices = tf.cast(gather_indices, dtype=tf.int32)
