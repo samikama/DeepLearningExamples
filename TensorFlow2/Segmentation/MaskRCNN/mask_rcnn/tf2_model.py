@@ -19,7 +19,8 @@ class MaskRCNN(tf.keras.Model):
                                  )
         self.fpn = fpn.FPNNetwork(params['min_level'], params['max_level'], trainable=trainable)
         num_anchors=len(params['aspect_ratios'] * params['num_scales'])
-        self.rpn = heads.RPN_Head_Model(name="rpn_head", num_anchors=num_anchors, trainable=trainable)
+        self.rpn = heads.RPN_Head_Model(name="rpn_head", 
+                                        num_anchors=num_anchors, trainable=trainable)
         is_gpu_inference = not trainable and params['use_batched_nms']
         self.box_head = heads.Box_Head_Model(num_classes=params['num_classes'],
                                              mlp_head_dim=params['fast_rcnn_mlp_head_dim'],
@@ -36,7 +37,9 @@ class MaskRCNN(tf.keras.Model):
             self.__dict__[key] = value
     
     @tf.function
-    def call(self, features, labels, training=True):
+    def call(self, features, labels=None, training=True):
+        if training:
+            assert labels!=None
         is_gpu_inference = not training and self.use_batched_nms
         batch_size, image_height, image_width, _ = features['images'].get_shape().as_list()
         #if 'source_ids' not in features:
@@ -67,13 +70,18 @@ class MaskRCNN(tf.keras.Model):
             rpn_nms_threshold=rpn_nms_threshold,
             rpn_min_size=self.rpn_min_size
         )
-        
-        model_outputs = self.rcnn(rpn_box_rois, rpn_box_scores, fpn_feats, 
-                                  labels['gt_boxes'], features['image_info'],
-                                  labels['gt_classes'], 
-                                  is_gpu_inference, 
-                                  cropped_gt_masks=labels.get('cropped_gt_masks'),
-                                  training=training)
+        if training:
+            model_outputs = self.rcnn(rpn_box_rois, rpn_box_scores, fpn_feats,
+                                      features['image_info'],
+                                      gt_boxes=labels['gt_boxes'], 
+                                      gt_classes=labels['gt_classes'], 
+                                      cropped_gt_masks=labels.get('cropped_gt_masks'),
+                                      training=True,
+                                      is_gpu_inference=is_gpu_inference)
+        else:
+            model_outputs = self.rcnn(rpn_box_rois, rpn_box_scores, fpn_feats,
+                                      features['image_info'], training=False,
+                                      is_gpu_inference=is_gpu_inference)
         model_outputs.update({
             'rpn_score_outputs': rpn_score_outputs,
             'rpn_box_outputs': rpn_box_outputs,
@@ -92,8 +100,9 @@ class MaskRCNN(tf.keras.Model):
         return scores_outputs, box_outputs, fpn_feats
     
     #@tf.function(experimental_compile=True)
-    def rcnn(self, rpn_box_rois, rpn_box_scores, fpn_feats, gt_boxes, image_info,
-             gt_classes, is_gpu_inference, cropped_gt_masks=None, training=True):
+    def rcnn(self, rpn_box_rois, rpn_box_scores, fpn_feats, image_info,
+             gt_boxes=None, gt_classes=None, cropped_gt_masks=None, training=True,
+             is_gpu_inference=False):
         model_outputs = {}
         rpn_box_rois = tf.cast(rpn_box_rois, dtype=tf.float32)
         if training:
@@ -155,7 +164,7 @@ class MaskRCNN(tf.keras.Model):
         if not training:
             selected_box_rois = model_outputs['detection_boxes']
             class_indices = model_outputs['detection_classes']
-        
+            class_indices = tf.cast(class_indices, dtype=tf.int32)
         else:
             selected_class_targets, selected_box_targets, \
             selected_box_rois, proposal_to_label_map = training_ops.select_fg_for_masks(
