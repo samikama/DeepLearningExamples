@@ -1,4 +1,5 @@
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+import tensorflow as tf2
 import json
 import logging
 import sys
@@ -8,6 +9,16 @@ from mask_rcnn.anchors import Anchors, AnchorLabeler
 from mask_rcnn.ops import preprocess_ops
 from pycocotools import mask
 import numpy as np
+
+import horovod.tensorflow as hvd
+
+from mask_rcnn.utils.logging_formatter import logging
+
+from mask_rcnn.utils.distributed_utils import MPI_is_distributed
+from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
+from mask_rcnn.utils.distributed_utils import MPI_rank
+from mask_rcnn.utils.distributed_utils import MPI_size
+from distutils.version import LooseVersion
 
 def create_category_index(categories):
     """Creates dictionary of COCO compatible categories keyed by category id.
@@ -48,22 +59,152 @@ def parse_annotations(annotations_file):
     logging.info('%d images are missing annotations.', missing_annotation_count)
     return images, category_index, annotations_index
 
+class FastDataLoader(object):
+    
+    def __init__(self, file_pattern, params):
+        self._file_pattern = file_pattern
+        self.image_preprocess = PreprocessImage(params)
+        self.params = params
+    
+    def __call__(self, params, input_context=None):
+        batch_size = params['batch_size'] if 'batch_size' in params else 1
+        try:
+            seed = params['seed'] * hvd.rank()
+        except (KeyError, TypeError):
+            seed = None
+        n_gpus = hvd.size()
+            
+        dataset = tf.data.Dataset.list_files(
+            self._file_pattern,
+            shuffle=False
+        )
+        if input_context is not None:
+            logging.info("Using Dataset Sharding with TF Distributed")
+            _num_shards = input_context.num_input_pipelines
+            _shard_idx = input_context.input_pipeline_id
+        
+        logging.info("Using Dataset Sharding with Horovod")
+        _shard_idx = hvd.rank() 
+        _num_shards = hvd.size()
+        
+        try:
+            dataset = dataset.shard(
+                num_shards=_num_shards,
+                index=_shard_idx
+            )
+            dataset = dataset.shuffle(math.ceil(256 / _num_shards))
+        
+        except NameError:  # Not a distributed training setup
+            pass
+        
+        def _prefetch_dataset(filename):
+            return tf.data.TFRecordDataset(filename).prefetch(1)
+
+        dataset = dataset.interleave(
+            map_func=_prefetch_dataset,
+            cycle_length=32,
+            block_length=64,
+            num_parallel_calls=tf.data.experimental.AUTOTUNE,
+        )
+        
+        dataset = dataset.cache()
+        
+        dataset = dataset.shuffle(
+            buffer_size=4096,
+            reshuffle_each_iteration=True,
+            seed=seed
+        )
+        
+        dataset = dataset.repeat()
+        
+        dataset = dataset.map(
+            map_func=self.image_preprocess,
+            num_parallel_calls=tf.data.experimental.AUTOTUNE,
+        )
+        
+        dataset = dataset.batch(
+            batch_size=batch_size,
+            drop_remainder=True
+        )
+        
+        dataset = dataset.prefetch(
+            buffer_size=tf.data.experimental.AUTOTUNE,
+        )
+
+        '''dataset = dataset.apply(
+            tf.data.experimental.prefetch_to_device(
+                '/gpu:{}'.format(hvd.rank()),  # With Horovod the local GPU is always 0
+                buffer_size=1,
+            )
+        )'''
+
+        data_options = tf.data.Options()
+        
+        data_options.experimental_deterministic = seed is not None
+        if LooseVersion(tf.__version__) <= LooseVersion("2.0.0"):
+            data_options.experimental_distribute.auto_shard = False
+        else:
+            data_options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
+        # data_options.experimental_distribute.auto_shard = False
+        data_options.experimental_slack = True
+
+        data_options.experimental_threading.max_intra_op_parallelism = 1
+        # data_options.experimental_threading.private_threadpool_size = int(multiprocessing.cpu_count() / n_gpus) * 2
+
+        # ================= experimental_optimization ================= #
+
+        data_options.experimental_optimization.apply_default_optimizations = False
+
+        # data_options.experimental_optimization.autotune = True
+        data_options.experimental_optimization.filter_fusion = True
+        data_options.experimental_optimization.map_and_batch_fusion = True
+        data_options.experimental_optimization.map_and_filter_fusion = True
+        data_options.experimental_optimization.map_fusion = True
+        data_options.experimental_optimization.map_parallelization = True
+
+        map_vectorization_options = tf.data.experimental.MapVectorizationOptions()
+        map_vectorization_options.enabled = True
+        map_vectorization_options.use_choose_fastest = True
+
+        data_options.experimental_optimization.map_vectorization = map_vectorization_options
+
+        data_options.experimental_optimization.noop_elimination = True
+        data_options.experimental_optimization.parallel_batch = True
+        data_options.experimental_optimization.shuffle_and_repeat_fusion = True
+
+        # ========== Stats on TF Data =============
+        # aggregator = tf.data.experimental.StatsAggregator()
+        # data_options.experimental_stats.aggregator = aggregator
+        # data_options.experimental_stats.latency_all_edges = True
+
+        dataset = dataset.with_options(data_options)
+
+        return dataset
+        
+
 class PreprocessImage(object):
     def __init__(self, params, MAX_NUM_INSTANCES=100):
         self.size = params['image_size']
         self.params = params
         self.MAX_NUM_INSTANCES = MAX_NUM_INSTANCES
     
-    def __call__(self, features, labels):
+    def __call__(self, example):
+        features, labels = self.parse_example(example)
         image = tf.cast(features['images'], tf.float32)
         image = preprocess_ops.normalize_image(image/255.)
         image, image_size, padding = self.resize(image)
+        # trying fp16
+        #image = tf.cast(image, tf.float16)
+        image.set_shape((832, 1344, 3))
         features['images'] = image
         labels['cropped_gt_masks'] = self.pad_masks(labels['cropped_gt_masks'])
         labels['gt_boxes'] = self.pad_to_fixed_size(labels['gt_boxes'], -1, 
                                                     [self.MAX_NUM_INSTANCES, 4])
         labels['gt_classes'] = self.pad_to_fixed_size(labels['gt_classes'], -1,
                                                       [self.MAX_NUM_INSTANCES, 1])
+        #labels['cropped_gt_masks'] = tf.cast(labels['cropped_gt_masks'], tf.float16)
+        #labels['gt_boxes'] = tf.cast(labels['gt_boxes'], tf.float16)
+        #labels['gt_classes'] = tf.cast(labels['gt_classes'], tf.float16)
         anchors = self.deserialize_anchors(labels)
         labels.update(anchors)
         return features, labels
@@ -112,6 +253,32 @@ class PreprocessImage(object):
         paddings = pad_value * tf.ones([pad_length, dimension])
         padded_data = tf.reshape(tf.concat([data, paddings], axis=0), output_shape)
         return padded_data
+    
+    def parse_example(self, example):
+        parsed = tf.io.parse_single_example(example, features_decoder)
+        features = {}
+        labels = {}
+        #features['images'] = tf.io.parse_tensor(parsed['image/image'], tf.float32)
+        features['images'] = tf.image.decode_jpeg(parsed['image/image_encoded'])
+        if tf.shape(features['images'])[-1]==1:
+            features['images'] = tf.image.grayscale_to_rgb(features['images'])
+        features['source_ids'] = parsed['image/source_id']
+        features['image_info'] = tf.io.parse_tensor(parsed['image/image_info'], tf.float32)
+        features['image_info'].set_shape(5)
+        labels['cropped_gt_masks'] = tf.io.parse_tensor(parsed['label/cropped_gt_masks'], tf.float32)
+        labels['gt_boxes'] = tf.io.parse_tensor(parsed['label/gt_boxes'], tf.float32)
+        labels['gt_classes'] = tf.io.parse_tensor(parsed['label/gt_classes'], tf.float32)
+        labels['score_targets_2'] = parsed['label/score_targets_2']
+        labels['score_targets_3'] = parsed['label/score_targets_3']
+        labels['score_targets_4'] = parsed['label/score_targets_4']
+        labels['score_targets_5'] = parsed['label/score_targets_5']
+        labels['score_targets_6'] = parsed['label/score_targets_6']
+        labels['box_targets_2'] = parsed['label/box_targets_2']
+        labels['box_targets_3'] = parsed['label/box_targets_3']
+        labels['box_targets_4'] = parsed['label/box_targets_4']
+        labels['box_targets_5'] = parsed['label/box_targets_5']
+        labels['box_targets_6'] = parsed['label/box_targets_6']
+        return features, labels
 
     
     
@@ -348,27 +515,3 @@ features_decoder = {
     'label/box_targets_6': tf.io.FixedLenFeature([3], tf.string),
 }
 
-def parse_example(example):
-    parsed = tf.io.parse_single_example(example, features_decoder)
-    features = {}
-    labels = {}
-    #features['images'] = tf.io.parse_tensor(parsed['image/image'], tf.float32)
-    features['images'] = tf.image.decode_jpeg(parsed['image/image_encoded'])
-    if tf.shape(features['images'])[-1]==1:
-        features['images'] = tf.image.grayscale_to_rgb(features['images'])
-    features['image/source_id'] = parsed['image/source_id']
-    features['image_info'] = tf.io.parse_tensor(parsed['image/image_info'], tf.float32)
-    labels['cropped_gt_masks'] = tf.io.parse_tensor(parsed['label/cropped_gt_masks'], tf.float32)
-    labels['gt_boxes'] = tf.io.parse_tensor(parsed['label/gt_boxes'], tf.float32)
-    labels['gt_classes'] = tf.io.parse_tensor(parsed['label/gt_classes'], tf.float32)
-    labels['score_targets_2'] = parsed['label/score_targets_2']
-    labels['score_targets_3'] = parsed['label/score_targets_3']
-    labels['score_targets_4'] = parsed['label/score_targets_4']
-    labels['score_targets_5'] = parsed['label/score_targets_5']
-    labels['score_targets_6'] = parsed['label/score_targets_6']
-    labels['box_targets_2'] = parsed['label/box_targets_2']
-    labels['box_targets_3'] = parsed['label/box_targets_3']
-    labels['box_targets_4'] = parsed['label/box_targets_4']
-    labels['box_targets_5'] = parsed['label/box_targets_5']
-    labels['box_targets_6'] = parsed['label/box_targets_6']
-    return features, labels

@@ -2,9 +2,9 @@ def get_data_params():
     return {
             "anchor_scale": 8.0,
             "aspect_ratios": [[1.0, 1.0], [1.4, 0.7], [0.7, 1.4]],
-            "batch_size": 1,
+            "batch_size": 4,
             "gt_mask_size": 112,
-            "image_size": [1024, 1024],
+            "image_size": [832, 1344],
             "include_groundtruth_in_features": False,
             "augment_input_data": False,
             "max_level": 6,

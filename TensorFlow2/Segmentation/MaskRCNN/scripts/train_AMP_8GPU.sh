@@ -28,7 +28,7 @@ mpirun \
     -x PATH \
     -mca pml ob1 -mca btl ^openib \
     --allow-run-as-root \
-    python ${BASEDIR}/../mask_rcnn_main.py \
+    python mask_rcnn_main.py \
         --mode="train_and_eval" \
         --checkpoint="/model/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
@@ -39,9 +39,9 @@ mpirun \
         --total_steps=45000 \
         --train_batch_size=4 \
         --eval_batch_size=8 \
-        --training_file_pattern="/data/train*.tfrecord" \
-        --validation_file_pattern="/data/val*.tfrecord" \
-        --val_json_file="/data/annotations/instances_val2017.json" \
+        --training_file_pattern="/workspace/shared_workspace/data/coco_2/train*.tfrecord" \
+        --validation_file_pattern="/workspace/shared_workspace/data/coco_2/val*.tfrecord" \
+        --val_json_file="/workspace/shared_workspace/data/coco_2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \
