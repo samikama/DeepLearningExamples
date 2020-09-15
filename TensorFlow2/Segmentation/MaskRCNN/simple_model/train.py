@@ -3,6 +3,7 @@ import sys
 sys.path.append('..')
 import itertools
 from time import time
+from statistics import mean
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
 #os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=2 --tf_xla_cpu_global_jit"
 from tqdm import tqdm
@@ -10,6 +11,7 @@ import numpy as np
 sys.path.append('..')
 import tensorflow.compat.v1 as tf
 tf.disable_eager_execution()
+tf.disable_v2_behavior()
 import horovod.tensorflow as hvd
 hvd.init()
 
@@ -37,8 +39,8 @@ from mask_rcnn.ops import training_ops
 import model
 import load_weights
 
-train_file_pattern = '/workspace/shared_workspace/data/coco/tf_record/train*'
-batch_size = 6
+train_file_pattern = '/home/ubuntu/data/coco/tf_record/train*'
+batch_size = 4
 
 data_params = dataset_params.get_data_params()
 params = mask_rcnn_params.default_config().values()
@@ -64,7 +66,7 @@ features, labels = tdf_iter.get_next()
 train_op, total_loss = model.model(features, params, labels)
 
 var_list = load_weights.build_assigment_map('resnet50/')
-checkpoint_file = tf.train.latest_checkpoint('/model/resnet/resnet-nhwc-2018-02-07/')
+checkpoint_file = tf.train.latest_checkpoint('../resnet/resnet-nhwc-2018-02-07/')
 _init_op, _init_feed_dict = load_weights.assign_from_checkpoint(checkpoint_file, var_list)
 
 steps = 118000//(batch_size * hvd.size())

@@ -177,7 +177,7 @@ class FastDataLoader(object):
         # data_options.experimental_stats.aggregator = aggregator
         # data_options.experimental_stats.latency_all_edges = True
 
-        dataset = dataset.with_options(data_options)
+        # dataset = dataset.with_options(data_options)
 
         return dataset
         
