@@ -65,9 +65,6 @@ images_0 = features_0['images']
 images_1 = features_1['images']
 
 def forward_single_gpu(images_0, images_1, is_training=True):
-    '''
-    For comparison, two resnet models on one GPU
-    '''
     resnet_0 = Resnet_Model(
                         "resnet50",
                         data_format='channels_last',
@@ -81,36 +78,43 @@ def forward_single_gpu(images_0, images_1, is_training=True):
                         finetune_bn=params['finetune_bn']
                     )
     features_0 = resnet_0(images_0)
+    features_0[2] = features_0[2][:,:,:-16,:]
+    features_0[3] = features_0[3][:,:,:-8,:]
+    features_0[4] = features_0[4][:,:,:-4,:]
+    features_0[5] = features_0[5][:,:,:-2,:]
+    
     features_1 = resnet_1(images_1)
+    features_1[2] = features_1[2][:,:,16:,:]
+    features_1[3] = features_1[3][:,:,8:,:]
+    features_1[4] = features_1[4][:,:,4:,:]
+    features_1[5] = features_1[5][:,:,2:,:]
     
-    C2_0_1 = tf.identity(features_0[2][:,:,:-16,:])
-    C2_1_0 = tf.identity(features_1[2][:,:,16:,:])
+    C2_0_1 = tf.identity(features_0[2])
+    C2_1_0 = tf.identity(features_1[2])
     
-    C3_0_1 = tf.identity(features_0[3][:,:,:-8,:])
-    C3_1_0 = tf.identity(features_1[3][:,:,8:,:])
+    C3_0_1 = tf.identity(features_0[3])
+    C3_1_0 = tf.identity(features_1[3])
     
-    C4_0_1 = tf.identity(features_0[4][:,:,:-4,:])
-    C4_1_0 = tf.identity(features_1[4][:,:,4:,:])
+    C4_0_1 = tf.identity(features_0[4])
+    C4_1_0 = tf.identity(features_1[4])
     
-    C5_0_1 = tf.identity(features_0[5][:,:,:-2,:])
-    C5_1_0 = tf.identity(features_1[5][:,:,2:,:])
+    C5_0_1 = tf.identity(features_0[5])
+    C5_1_0 = tf.identity(features_1[5])
     
-    features_0[2] = tf.concat([features_0[2][:,:,:-16,:], C2_1_0], axis=2)
-    features_0[3] = tf.concat([features_0[3][:,:,:-8,:], C3_1_0], axis=2)
-    features_0[4] = tf.concat([features_0[4][:,:,:-4,:], C4_1_0], axis=2)
-    features_0[5] = tf.concat([features_0[5][:,:,:-2,:], C5_1_0], axis=2)
+    features_0[2] = tf.concat([features_0[2], C2_1_0], axis=2)
+    features_0[3] = tf.concat([features_0[3], C3_1_0], axis=2)
+    features_0[4] = tf.concat([features_0[4], C4_1_0], axis=2)
+    features_0[5] = tf.concat([features_0[5], C5_1_0], axis=2)
     
-    features_1[2] = tf.concat([C2_0_1, features_1[2][:,:,16:,:]], axis=2)
-    features_1[3] = tf.concat([C3_0_1, features_1[3][:,:,8:,:]], axis=2)
-    features_1[4] = tf.concat([C4_0_1, features_1[4][:,:,4:,:]], axis=2)
-    features_1[5] = tf.concat([C5_0_1, features_1[5][:,:,2:,:]], axis=2)
+    features_1[2] = tf.concat([C2_0_1, features_1[2]], axis=2)
+    features_1[3] = tf.concat([C3_0_1, features_1[3]], axis=2)
+    features_1[4] = tf.concat([C4_0_1, features_1[4]], axis=2)
+    features_1[5] = tf.concat([C5_0_1, features_1[5]], axis=2)
     
     return features_0, features_1
 
 def forward_2_gpu(images_0, images_1, is_training=True):
-    '''
-    Same model across two GPUs
-    '''
+    
     # Place ops on each device
     with tf.device(devices[0].name):
         resnet_0 = Resnet_Model(
@@ -129,36 +133,44 @@ def forward_2_gpu(images_0, images_1, is_training=True):
     # Run half of resnet on each
     with tf.device(devices[0].name):
         features_0 = resnet_0(images_0)
+        features_0[2] = features_0[2][:,:,:-16,:]
+        features_0[3] = features_0[3][:,:,:-8,:]
+        features_0[4] = features_0[4][:,:,:-4,:]
+        features_0[5] = features_0[5][:,:,:-2,:]
     
     with tf.device(devices[1].name):
         features_1 = resnet_1(images_1)
+        features_1[2] = features_1[2][:,:,16:,:]
+        features_1[3] = features_1[3][:,:,8:,:]
+        features_1[4] = features_1[4][:,:,4:,:]
+        features_1[5] = features_1[5][:,:,2:,:]
     
     # copy tensors from device 1 to device 0 cut off overlapping section
     with tf.device(devices[0].name):
-        C2_1_0 = tf.stop_gradient(tf.identity(features_1[2][:,:,16:,:]))
-        C3_1_0 = tf.stop_gradient(tf.identity(features_1[3][:,:,8:,:]))
-        C4_1_0 = tf.stop_gradient(tf.identity(features_1[4][:,:,4:,:]))
-        C5_1_0 = tf.stop_gradient(tf.identity(features_1[5][:,:,2:,:]))
+        C2_1_0 = tf.stop_gradient(tf.identity(features_1[2]))
+        C3_1_0 = tf.stop_gradient(tf.identity(features_1[3]))
+        C4_1_0 = tf.stop_gradient(tf.identity(features_1[4]))
+        C5_1_0 = tf.stop_gradient(tf.identity(features_1[5]))
     
     # copy tensors from device 0 to device 1 cut off overlapping section
     with tf.device(devices[1].name):
-        C2_0_1 = tf.stop_gradient(tf.identity(features_0[2][:,:,:-16,:]))
-        C3_0_1 = tf.stop_gradient(tf.identity(features_0[3][:,:,:-8,:]))
-        C4_0_1 = tf.stop_gradient(tf.identity(features_0[4][:,:,:-4,:]))
-        C5_0_1 = tf.stop_gradient(tf.identity(features_0[5][:,:,:-2,:]))
+        C2_0_1 = tf.stop_gradient(tf.identity(features_0[2]))
+        C3_0_1 = tf.stop_gradient(tf.identity(features_0[3]))
+        C4_0_1 = tf.stop_gradient(tf.identity(features_0[4]))
+        C5_0_1 = tf.stop_gradient(tf.identity(features_0[5]))
     
     # concatenate tensors
     with tf.device(devices[0].name):
-        features_0[2] = tf.concat([features_0[2][:,:,:-16,:], C2_1_0], axis=2)
-        features_0[3] = tf.concat([features_0[3][:,:,:-8,:], C3_1_0], axis=2)
-        features_0[4] = tf.concat([features_0[4][:,:,:-4,:], C4_1_0], axis=2)
-        features_0[5] = tf.concat([features_0[5][:,:,:-2,:], C5_1_0], axis=2)
+        features_0[2] = tf.concat([features_0[2], C2_1_0], axis=2)
+        features_0[3] = tf.concat([features_0[3], C3_1_0], axis=2)
+        features_0[4] = tf.concat([features_0[4], C4_1_0], axis=2)
+        features_0[5] = tf.concat([features_0[5], C5_1_0], axis=2)
     
     with tf.device(devices[1].name):
-        features_1[2] = tf.concat([C2_0_1, features_1[2][:,:,16:,:]], axis=2)
-        features_1[3] = tf.concat([C3_0_1, features_1[3][:,:,8:,:]], axis=2)
-        features_1[4] = tf.concat([C4_0_1, features_1[4][:,:,4:,:]], axis=2)
-        features_1[5] = tf.concat([C5_0_1, features_1[5][:,:,2:,:]], axis=2)
+        features_1[2] = tf.concat([C2_0_1, features_1[2]], axis=2)
+        features_1[3] = tf.concat([C3_0_1, features_1[3]], axis=2)
+        features_1[4] = tf.concat([C4_0_1, features_1[4]], axis=2)
+        features_1[5] = tf.concat([C5_0_1, features_1[5]], axis=2)
     
     return features_0, features_1
 
