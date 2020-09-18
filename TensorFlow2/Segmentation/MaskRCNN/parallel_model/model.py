@@ -28,44 +28,69 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
                                   params['anchor_scale'],
                                   (image_height, image_width))
     
-    # run backbone split across two GPUs
+    # Place ops on each device
     with tf.device(devices[0].name):
         MODELS["backbone_0"] = resnet.Resnet_Model(
-            "resnet50",
-            data_format='channels_last',
-            trainable=is_training,
-            finetune_bn=params['finetune_bn']
-        )
-        backbone_feats_0 = MODELS["backbone_0"](
-            features_0['images'],
-            training=is_training,
-        )
+                            "resnet50",
+                            data_format='channels_last',
+                            trainable=is_training,
+                            finetune_bn=params['finetune_bn']
+                        )
     with tf.device(devices[1].name):
         MODELS["backbone_1"] = resnet.Resnet_Model(
-            "resnet50",
-            data_format='channels_last',
-            trainable=is_training,
-            finetune_bn=params['finetune_bn']
-        )
-        backbone_feats_1 = MODELS["backbone_1"](
-            features_1['images'],
-            training=is_training,
-        )
-    
-    # merge backbone on first GPU
-    # cut off overlapping region
+                            "resnet50",
+                            data_format='channels_last',
+                            trainable=is_training,
+                            finetune_bn=params['finetune_bn']
+                        )
+    # Run half of resnet on each
     with tf.device(devices[0].name):
-        backbone_feats_0 = {i: tf.concat([j[:,:,:-idx,:],k[:,:,idx:,:]], axis=2) \
-                            for (i,j),k,idx \
-             in zip(backbone_feats_0.items(), 
-                    backbone_feats_1.values(), [16, 8, 4, 2])}
-        
+        res_out_0 = MODELS["backbone_0"](features_0['images'])
+        res_out_0[2] = res_out_0[2][:,:,:-16,:]
+        res_out_0[3] = res_out_0[3][:,:,:-8,:]
+        res_out_0[4] = res_out_0[4][:,:,:-4,:]
+        res_out_0[5] = res_out_0[5][:,:,:-2,:]
+    
+    with tf.device(devices[1].name):
+        res_out_1 = MODELS["backbone_1"](features_1['images'])
+        res_out_1[2] = res_out_1[2][:,:,16:,:]
+        res_out_1[3] = res_out_1[3][:,:,8:,:]
+        res_out_1[4] = res_out_1[4][:,:,4:,:]
+        res_out_1[5] = res_out_1[5][:,:,2:,:]
+    
+    # copy tensors from device 1 to device 0 cut off overlapping section
+    with tf.device(devices[0].name):
+        C2_1_0 = tf.stop_gradient(tf.identity(res_out_1[2]))
+        C3_1_0 = tf.stop_gradient(tf.identity(res_out_1[3]))
+        C4_1_0 = tf.stop_gradient(tf.identity(res_out_1[4]))
+        C5_1_0 = tf.stop_gradient(tf.identity(res_out_1[5]))
+    
+    # copy tensors from device 0 to device 1 cut off overlapping section
+    with tf.device(devices[1].name):
+        C2_0_1 = tf.stop_gradient(tf.identity(res_out_0[2]))
+        C3_0_1 = tf.stop_gradient(tf.identity(res_out_0[3]))
+        C4_0_1 = tf.stop_gradient(tf.identity(res_out_0[4]))
+        C5_0_1 = tf.stop_gradient(tf.identity(res_out_0[5]))
+    
+    # concatenate tensors
+    with tf.device(devices[0].name):
+        res_out_0[2] = tf.concat([res_out_0[2], C2_1_0], axis=2)
+        res_out_0[3] = tf.concat([res_out_0[3], C3_1_0], axis=2)
+        res_out_0[4] = tf.concat([res_out_0[4], C4_1_0], axis=2)
+        res_out_0[5] = tf.concat([res_out_0[5], C5_1_0], axis=2)
+    
+    with tf.device(devices[1].name):
+        res_out_1[2] = tf.concat([C2_0_1, res_out_1[2]], axis=2)
+        res_out_1[3] = tf.concat([C3_0_1, res_out_1[3]], axis=2)
+        res_out_1[4] = tf.concat([C4_0_1, res_out_1[4]], axis=2)
+        res_out_1[5] = tf.concat([C5_0_1, res_out_1[5]], axis=2)
+    
     # run full FPN and RPN on first GPU
     with tf.device(devices[0].name):
         MODELS["FPN"] = fpn.FPNNetwork(params['min_level'], 
                                        params['max_level'], 
                                        trainable=is_training)
-        fpn_feats = MODELS["FPN"](backbone_feats_0, training=is_training)
+        fpn_feats = MODELS["FPN"](res_out_0, training=is_training)
     
         model_outputs.update({'fpn_features': fpn_feats})
 
