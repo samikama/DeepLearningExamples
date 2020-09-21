@@ -285,7 +285,7 @@ def create_optimizer(learning_rate, params):
         compression=hvd.Compression.fp16,
         sparse_as_dense=False
     )'''
-    optimizer = hvd.DistributedOptimizer(optimizer)
+    #optimizer = hvd.DistributedOptimizer(optimizer)
     
     loss_scale = tf.train.experimental.DynamicLossScale(
         initial_loss_scale=(2 ** 12),

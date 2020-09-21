@@ -2,10 +2,16 @@ import os
 import sys
 import itertools
 from statistics import mean
-from time import time
+import time
 from tqdm import tqdm
+import numpy as np
 sys.path.append('..')
+
+os.environ["TF_GPU_THREAD_MODE"]="gpu_private"
+os.environ["TF_GPU_THREAD_COUNT"]="1"
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
+os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
+
 import tensorflow.compat.v1 as tf
 tf.disable_eager_execution()
 tf.disable_v2_behavior()
@@ -25,7 +31,7 @@ from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn import dataset_utils
 from simple_model import load_weights
 
-train_file_pattern = '/home/ubuntu/data/coco/tf_record/train*'
+train_file_pattern = '/data/coco/coco-2017/tfr_anchor/train*'
 batch_size = 1
 data_params = dataset_params.get_data_params()
 params = mask_rcnn_params.default_config().values()
@@ -70,7 +76,7 @@ train_op, total_loss = model.model(features_0, features_1, params, devices, labe
 
 var_list_0 = load_weights.build_assigment_map('resnet50/')
 var_list_1 = load_weights.build_assigment_map('resnet50_1/')
-checkpoint_file = tf.train.latest_checkpoint('../resnet/resnet-nhwc-2018-02-07/')
+checkpoint_file = tf.train.latest_checkpoint('../weights/resnet/resnet-nhwc-2018-02-07/')
 _init_op_0, _init_feed_dict_0 = load_weights.assign_from_checkpoint(checkpoint_file, var_list_0)
 _init_op_1, _init_feed_dict_1 = load_weights.assign_from_checkpoint(checkpoint_file, var_list_1)
 
@@ -82,9 +88,19 @@ with tf.Session() as sess:
     sess.run(tdf_iter_1.initializer)
     sess.run(var_initializer)
     loss_history = []
-    p_bar = tqdm(range(10000))
+    p_bar = tqdm(range(20))
+    timings=[]
     for i in p_bar:
         _, loss = sess.run([train_op, total_loss])
+
+    p_bar = tqdm(range(200))
+    for i in p_bar:
+        tstart=time.perf_counter()
+        _, loss = sess.run([train_op, total_loss])
+        delta_t=time.perf_counter()-tstart
+        timings.append(delta_t)
         loss_history.append(loss)
         ma_loss = mean(loss_history[-100:])
         p_bar.set_description("Loss: {0:.4f}".format(ma_loss))
+    timings=np.asarray(timings,np.float)
+    print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
