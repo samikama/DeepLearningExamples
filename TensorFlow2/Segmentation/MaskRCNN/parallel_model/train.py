@@ -8,7 +8,7 @@ import numpy as np
 sys.path.append('..')
 
 os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
-os.environ["TF_GPU_THREAD_COUNT"] = "1"
+os.environ["TF_GPU_THREAD_COUNT"] = "2"
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
 #os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
 do_profile = True
@@ -19,8 +19,8 @@ tf.disable_eager_execution()
 tf.disable_v2_behavior()
 tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
 
-# import horovod.tensorflow as hvd
-# hvd.init()
+import horovod.tensorflow as hvd
+hvd.init()
 
 physical_devices = tf.config.list_physical_devices('GPU')
 # set two gpus visible per horovod rank
@@ -96,16 +96,38 @@ var_initializer = tf.global_variables_initializer()
 profile_base = "/work/sami/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/Profiles"
 suffix = ""
 xlaflags = os.environ.get("TF_XLA_FLAGS", "")
+
+
+def get_env_value(env_str, key):
+  pos = env_str.find(key)
+  if pos >= 0:
+    substr = env_str[pos + len(key)]
+    if substr.find(" ") == -1:
+      return substr
+    else:
+      return substr[:substr.find(" ")]
+  return None
+
+
 if "fusible" in xlaflags:
   suffix += "_fusible"
+elif "tf_xla_auto_jit=" in xlaflags:
+  val = get_env_value(xlaflags, "tf_xla_auto_jit=")
+  if val:
+    suffix += f"_jit_{val}"
+
 if "min_cluster_size" in xlaflags:
-  pos = xlaflags.find("min_cluster_size=")
-  if pos >= 0:
-    substr = xlaflags[pos + len("min_cluster_size=")]
-    if substr.find(" ") == -1:
-      suffix += "_csize" + substr
-    else:
-      suffix += "_csize" + substr[:substr.find(" ")]
+  val = get_env_value(xlaflags, "min_cluster_size=")
+  if val:
+    suffix += "_csize" + val
+
+  # pos = xlaflags.find("min_cluster_size=")
+  # if pos >= 0:
+  #   substr = xlaflags[pos + len("min_cluster_size=")]
+  #   if substr.find(" ") == -1:
+  #     suffix += "_csize" + substr
+  #   else:
+  #     suffix += "_csize" + substr[:substr.find(" ")]
 
 if os.environ.get("TF_GPU_THREAD_MODE") == 'gpu_private':
   suffix += "_privThr_" + os.environ.get("TF_GPU_THREAD_COUNT", "2")
@@ -138,7 +160,8 @@ def do_step_profile(profile_path, sess, stepstr, progressbar, fetch_ops):
 
 
 if "TFLocal" in tf.__file__:
-  profile_path = os.path.join(profile_base, f"LocalBuild_2.4{suffix}")
+  profile_path = os.path.join(profile_base,
+                              f"LocalBuild_2.4_split_model{suffix}")
   stepstr = "local"
 with tf.Session() as sess:
   sess.run(_init_op_0, _init_feed_dict_0)
