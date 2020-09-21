@@ -18,7 +18,7 @@ from mask_rcnn.training import losses, learning_rates
 
 MODELS = dict()
 
-def forward(features_0, features_1, params, devices, labels=None, is_training=True):
+def forward(features_0, features_1, params, devices, labels_0=None, labels_1=None, is_training=True):
     model_outputs = {}
     is_gpu_inference = not is_training and params['use_batched_nms']
     batch_size, image_height, image_width, _ = features_0['images'].get_shape().as_list()
@@ -206,8 +206,8 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
         box_targets_0, class_targets_0, rpn_box_rois_0, proposal_to_label_map_0 = \
         training_ops.proposal_label_op(
             rpn_box_rois_0,
-            labels['gt_boxes'],
-            labels['gt_classes'],
+            labels_0['gt_boxes'],
+            labels_0['gt_classes'],
             batch_size_per_im=params['batch_size_per_im'],
             fg_fraction=params['fg_fraction'],
             fg_thresh=params['fg_thresh'],
@@ -217,8 +217,8 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
         box_targets_1, class_targets_1, rpn_box_rois_1, proposal_to_label_map_1 = \
         training_ops.proposal_label_op(
             rpn_box_rois_1,
-            labels['gt_boxes'],
-            labels['gt_classes'],
+            labels_1['gt_boxes'],
+            labels_1['gt_classes'],
             batch_size_per_im=params['batch_size_per_im'],
             fg_fraction=params['fg_fraction'],
             fg_thresh=params['fg_thresh'],
@@ -226,7 +226,7 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
             bg_thresh_lo=params['bg_thresh_lo']
         )
     
-    # Run both box heads on first GPU
+    # Run both heads on first GPU
     with tf.device(devices[0].name):
         # Performs multi-level RoIAlign.
         box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
@@ -236,17 +236,17 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
             is_gpu_inference=is_gpu_inference
         )
 
-        MODELS["Box_Head"] = heads.Box_Head_Model(
+        MODELS["Box_Head_0"] = heads.Box_Head_Model(
             num_classes=params['num_classes'],
             mlp_head_dim=params['fast_rcnn_mlp_head_dim'],
             trainable=is_training
         )
-        class_outputs, box_outputs, _ = MODELS["Box_Head"](inputs=box_roi_features)
+        class_outputs_0, box_outputs_0, _ = MODELS["Box_Head_0"](inputs=box_roi_features)
         if not is_training:
             generate_detections_fn = postprocess_ops.generate_detections_gpu
-            detections = generate_detections_fn(
-                class_outputs=class_outputs,
-                box_outputs=box_outputs,
+            detections_0 = generate_detections_fn(
+                class_outputs=class_outputs_0,
+                box_outputs=box_outputs_0,
                 anchor_boxes=rpn_box_rois_0,
                 image_info=features_0['image_info'],
                 pre_nms_num_detections=params['test_rpn_post_nms_topn'],
@@ -255,13 +255,13 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
                 bbox_reg_weights=params['bbox_reg_weights']
             )
             model_outputs.update({
-                'num_detections': detections[0],
-                'detection_boxes': detections[1],
-                'detection_classes': detections[2],
-                'detection_scores': detections[3],
+                'num_detections_0': detections_0[0],
+                'detection_boxes_0': detections_0[1],
+                'detection_classes_0': detections_0[2],
+                'detection_scores_0': detections_0[3],
             })
         else:  # is training
-            encoded_box_targets = training_ops.encode_box_targets(
+            encoded_box_targets_0 = training_ops.encode_box_targets(
                 boxes=rpn_box_rois_0,
                 gt_boxes=box_targets_0,
                 gt_labels=class_targets_0,
@@ -271,28 +271,140 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
             model_outputs.update({
                 'rpn_score_outputs_0': rpn_score_outputs_0,
                 'rpn_box_outputs_0': rpn_box_outputs_0,
-                'class_outputs': tf.cast(class_outputs, tf.float32),
-                'box_outputs': tf.cast(box_outputs, tf.float32),
+                'class_outputs_0': tf.cast(class_outputs_0, tf.float32),
+                'box_outputs_0': tf.cast(box_outputs_0, tf.float32),
                 'class_targets_0': class_targets_0,
-                'box_targets': encoded_box_targets,
-                'box_rois': rpn_box_rois_0,
+                'box_targets_0': encoded_box_targets_0,
+                'box_rois_0': rpn_box_rois_0,
             })
-    with tf.device(devices[1].name):
-        # Mask sampling
         if not is_training:
-            selected_box_rois = model_outputs['detection_boxes']
-            class_indices = model_outputs['detection_classes']
-
+            selected_box_rois_0 = model_outputs['detection_boxes_0']
+            class_indices_0 = model_outputs['detection_classes_0']
+            
             # If using GPU for inference, delay the cast until when Gather ops show up
             # since GPU inference supports float point better.
             # TODO(laigd): revisit this when newer versions of GPU libraries is
             # released.
             if not params['use_batched_nms']:
-                class_indices = tf.cast(class_indices, dtype=tf.int32)
+                class_indices_0 = tf.cast(class_indices_0, dtype=tf.int32)
+        
+        else:
+            selected_class_targets_0, selected_box_targets_0, \
+            selected_box_rois_0, proposal_to_label_map_0 = \
+            training_ops.select_fg_for_masks(
+                class_targets=class_targets_0,
+                box_targets=box_targets_0,
+                boxes=rpn_box_rois_0,
+                proposal_to_label_map=proposal_to_label_map_0,
+                max_num_fg=int(params['batch_size_per_im'] * params['fg_fraction'])
+            )
+
+            class_indices_0 = tf.cast(selected_class_targets_0, dtype=tf.int32)
+            
+        mask_roi_features_0 = spatial_transform_ops.multilevel_crop_and_resize(
+            features=fpn_feats_0,
+            boxes=selected_box_rois_0,
+            output_size=14,
+            is_gpu_inference=is_gpu_inference
+        )
+        
+        MODELS["Mask_Head_0"] = heads.Mask_Head_Model(
+            class_indices_0,
+            num_classes=params['num_classes'],
+            mrcnn_resolution=params['mrcnn_resolution'],
+            is_gpu_inference=is_gpu_inference,
+            trainable=is_training,
+            name="mask_head"
+        )
+
+        mask_outputs_0 = MODELS["Mask_Head_0"](inputs=mask_roi_features_0)
+
+        if is_training:
+            mask_targets_0 = training_ops.get_mask_targets(
+
+                fg_boxes=selected_box_rois_0,
+                fg_proposal_to_label_map=proposal_to_label_map_0,
+                fg_box_targets=selected_box_targets_0,
+                mask_gt_labels=labels_0['cropped_gt_masks'],
+                output_size=params['mrcnn_resolution']
+            )
+
+            model_outputs.update({
+                'mask_outputs_0': tf.cast(mask_outputs_0, tf.float32),
+                'mask_targets_0': mask_targets_0,
+                'selected_class_targets_0': selected_class_targets_0,
+            })
 
         else:
-            selected_class_targets, selected_box_targets, \
-            selected_box_rois, proposal_to_label_map = \
+            model_outputs.update({
+                'detection_masks_0': tf.nn.sigmoid(mask_outputs_0),
+            })
+            
+    # Run both heads on second GPU
+    with tf.device(devices[1].name):
+        # Performs multi-level RoIAlign.
+        box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+            features=fpn_feats_1,
+            boxes=rpn_box_rois_1,
+            output_size=7,
+            is_gpu_inference=is_gpu_inference
+        )
+
+        MODELS["Box_Head_1"] = heads.Box_Head_Model(
+            num_classes=params['num_classes'],
+            mlp_head_dim=params['fast_rcnn_mlp_head_dim'],
+            trainable=is_training
+        )
+        class_outputs_1, box_outputs_1, _ = MODELS["Box_Head_1"](inputs=box_roi_features)
+        if not is_training:
+            generate_detections_fn = postprocess_ops.generate_detections_gpu
+            detections_1 = generate_detections_fn(
+                class_outputs=class_outputs_1,
+                box_outputs=box_outputs_1,
+                anchor_boxes=rpn_box_rois_1,
+                image_info=features_1['image_info'],
+                pre_nms_num_detections=params['test_rpn_post_nms_topn'],
+                post_nms_num_detections=params['test_detections_per_image'],
+                nms_threshold=params['test_nms'],
+                bbox_reg_weights=params['bbox_reg_weights']
+            )
+            model_outputs.update({
+                'num_detections_1': detections_1[0],
+                'detection_boxes_1': detections_1[1],
+                'detection_classes_1': detections_1[2],
+                'detection_scores_1': detections_1[3],
+            })
+        else:  # is training
+            encoded_box_targets_1 = training_ops.encode_box_targets(
+                boxes=rpn_box_rois_1,
+                gt_boxes=box_targets_1,
+                gt_labels=class_targets_1,
+                bbox_reg_weights=params['bbox_reg_weights']
+            )
+
+            model_outputs.update({
+                'rpn_score_outputs_1': rpn_score_outputs_1,
+                'rpn_box_outputs_1': rpn_box_outputs_1,
+                'class_outputs_1': tf.cast(class_outputs_1, tf.float32),
+                'box_outputs_1': tf.cast(box_outputs_1, tf.float32),
+                'class_targets_1': class_targets_1,
+                'box_targets_1': encoded_box_targets_1,
+                'box_rois_1': rpn_box_rois_1,
+            })
+        if not is_training:
+            selected_box_rois_1 = model_outputs['detection_boxes_1']
+            class_indices_1 = model_outputs['detection_classes_1']
+            
+            # If using GPU for inference, delay the cast until when Gather ops show up
+            # since GPU inference supports float point better.
+            # TODO(laigd): revisit this when newer versions of GPU libraries is
+            # released.
+            if not params['use_batched_nms']:
+                class_indices_1 = tf.cast(class_indices_1, dtype=tf.int32)
+        
+        else:
+            selected_class_targets_1, selected_box_targets_1, \
+            selected_box_rois_1, proposal_to_label_map_1 = \
             training_ops.select_fg_for_masks(
                 class_targets=class_targets_1,
                 box_targets=box_targets_1,
@@ -301,17 +413,17 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
                 max_num_fg=int(params['batch_size_per_im'] * params['fg_fraction'])
             )
 
-            class_indices = tf.cast(selected_class_targets, dtype=tf.int32)
-
-        mask_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+            class_indices_1 = tf.cast(selected_class_targets_1, dtype=tf.int32)
+            
+        mask_roi_features_1 = spatial_transform_ops.multilevel_crop_and_resize(
             features=fpn_feats_1,
-            boxes=selected_box_rois,
+            boxes=selected_box_rois_1,
             output_size=14,
             is_gpu_inference=is_gpu_inference
         )
-
-        MODELS["Mask_Head"] = heads.Mask_Head_Model(
-            class_indices,
+        
+        MODELS["Mask_Head_1"] = heads.Mask_Head_Model(
+            class_indices_1,
             num_classes=params['num_classes'],
             mrcnn_resolution=params['mrcnn_resolution'],
             is_gpu_inference=is_gpu_inference,
@@ -319,30 +431,30 @@ def forward(features_0, features_1, params, devices, labels=None, is_training=Tr
             name="mask_head"
         )
 
-        mask_outputs = MODELS["Mask_Head"](inputs=mask_roi_features)
+        mask_outputs_1 = MODELS["Mask_Head_1"](inputs=mask_roi_features_1)
 
         if is_training:
-            mask_targets = training_ops.get_mask_targets(
+            mask_targets_1 = training_ops.get_mask_targets(
 
-                fg_boxes=selected_box_rois,
-                fg_proposal_to_label_map=proposal_to_label_map,
-                fg_box_targets=selected_box_targets,
-                mask_gt_labels=labels['cropped_gt_masks'],
+                fg_boxes=selected_box_rois_1,
+                fg_proposal_to_label_map=proposal_to_label_map_1,
+                fg_box_targets=selected_box_targets_1,
+                mask_gt_labels=labels_1['cropped_gt_masks'],
                 output_size=params['mrcnn_resolution']
             )
 
             model_outputs.update({
-                'mask_outputs': tf.cast(mask_outputs, tf.float32),
-                'mask_targets': mask_targets,
-                'selected_class_targets': selected_class_targets,
+                'mask_outputs_1': tf.cast(mask_outputs_1, tf.float32),
+                'mask_targets_1': mask_targets_1,
+                'selected_class_targets_1': selected_class_targets_1,
             })
 
         else:
             model_outputs.update({
-                'detection_masks': tf.nn.sigmoid(mask_outputs),
+                'detection_masks_1': tf.nn.sigmoid(mask_outputs_1),
             })
-
-        return model_outputs
+    
+    return model_outputs
     
 def create_optimizer(learning_rate, params):
     """Creates optimized based on the specified flags."""
@@ -368,10 +480,10 @@ def create_optimizer(learning_rate, params):
                                                                        loss_scale=loss_scale)
     return optimizer
 
-def model(features_0, features_1, params, devices, labels=None, is_training=True):
+def model(features_0, features_1, params, devices, labels_0=None, labels_1=None, is_training=True):
     global_step = tf.train.get_or_create_global_step()
     model_outputs = forward(features_0, features_1, params, 
-                            devices, labels, is_training)
+                            devices, labels_0, labels_1, is_training)
     #model_outputs['class_targets'] = tf.cast(model_outputs['class_targets'])
     model_outputs.update({
         'source_id': features_0['source_ids'],
@@ -386,41 +498,10 @@ def model(features_0, features_1, params, devices, labels=None, is_training=True
         model_outputs.pop('fpn_features', None)
         predictions.update(model_outputs)
         return model_outputs
-    total_rpn_loss, rpn_score_loss, rpn_box_loss = losses.rpn_loss(
-        score_outputs=model_outputs['rpn_score_outputs_0'],
-        box_outputs=model_outputs['rpn_box_outputs_0'],
-        labels=labels,
-        params=params
-    )
-    total_fast_rcnn_loss, fast_rcnn_class_loss, fast_rcnn_box_loss = losses.fast_rcnn_loss(
-        class_outputs=model_outputs['class_outputs'],
-        box_outputs=model_outputs['box_outputs'],
-        class_targets=model_outputs['class_targets_0'],
-        box_targets=model_outputs['box_targets'],
-        params=params
-    )
-    mask_loss = losses.mask_rcnn_loss(
-        mask_outputs=model_outputs['mask_outputs'],
-        mask_targets=model_outputs['mask_targets'],
-        select_class_targets=model_outputs['selected_class_targets'],
-        params=params
-    )
+    
     trainable_variables = list(itertools.chain.from_iterable([model.trainable_variables \
                                                               for model in MODELS.values()]))
-    gpu_0_vars = []
-    gpu_1_vars = []
-    for var in trainable_variables:
-        if var.device == '/device:GPU:0':
-            gpu_0_vars.append(var)
-        elif var.device == '/device:GPU:1':
-            gpu_1_vars.append(var)
-    l2_regularization_loss = params['l2_weight_decay'] * tf.add_n([
-        tf.nn.l2_loss(v)
-        for v in trainable_variables
-        if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
-    ])
-
-    total_loss = total_rpn_loss + total_fast_rcnn_loss + mask_loss + l2_regularization_loss
+    
     learning_rate = learning_rates.step_learning_rate_with_linear_warmup(
         global_step=global_step,
         init_learning_rate=params['init_learning_rate'],
@@ -429,36 +510,100 @@ def model(features_0, features_1, params, devices, labels=None, is_training=True
         learning_rate_levels=params['learning_rate_levels'],
         learning_rate_steps=params['learning_rate_steps']
     )
-    optimizer_0 = create_optimizer(learning_rate, params)
-    optimizer_1 = create_optimizer(learning_rate, params)
-    grads_and_vars_0 = optimizer_0.compute_gradients(total_loss, 
+    
+    gpu_0_vars = []
+    gpu_1_vars = []
+    for var in trainable_variables:
+        if var.device == '/device:GPU:0':
+            gpu_0_vars.append(var)
+        elif var.device == '/device:GPU:1':
+            gpu_1_vars.append(var)
+    
+    with tf.device(devices[0].name):
+        total_rpn_loss_0, rpn_score_loss_0, rpn_box_loss_0 = losses.rpn_loss(
+            score_outputs=model_outputs['rpn_score_outputs_0'],
+            box_outputs=model_outputs['rpn_box_outputs_0'],
+            labels=labels_0,
+            params=params
+        )
+        total_fast_rcnn_loss_0, fast_rcnn_class_loss_0, fast_rcnn_box_loss_0 = losses.fast_rcnn_loss(
+            class_outputs=model_outputs['class_outputs_0'],
+            box_outputs=model_outputs['box_outputs_0'],
+            class_targets=model_outputs['class_targets_0'],
+            box_targets=model_outputs['box_targets_0'],
+            params=params
+        )
+        mask_loss_0 = losses.mask_rcnn_loss(
+            mask_outputs=model_outputs['mask_outputs_0'],
+            mask_targets=model_outputs['mask_targets_0'],
+            select_class_targets=model_outputs['selected_class_targets_0'],
+            params=params
+        )
+        
+        l2_regularization_loss_0 = params['l2_weight_decay'] * tf.add_n([
+            tf.nn.l2_loss(v)
+            for v in gpu_0_vars
+            if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
+        ])
+
+        total_loss_0 = total_rpn_loss_0 + total_fast_rcnn_loss_0 + mask_loss_0 + l2_regularization_loss_0
+        
+        optimizer_0 = create_optimizer(learning_rate, params)
+        grads_and_vars_0 = optimizer_0.compute_gradients(total_loss_0, 
                                                   gpu_0_vars, 
                                                   colocate_gradients_with_ops=True)
-    grads_and_vars_1 = optimizer_1.compute_gradients(total_loss, 
+        gradients_0, variables_0 = zip(*grads_and_vars_0)
+        grads_and_vars_0 = []
+        for grad, var in zip(gradients_0, variables_0):
+
+            if grad is not None and any([pattern in var.name for pattern in ["bias", "beta"]]):
+                grad = 2.0 * grad
+
+            grads_and_vars_0.append((grad, var))
+        train_op_0 = optimizer_0.apply_gradients(grads_and_vars_0, global_step=global_step)
+        
+    
+    with tf.device(devices[1].name):
+        total_rpn_loss_1, rpn_score_loss_1, rpn_box_loss_1 = losses.rpn_loss(
+            score_outputs=model_outputs['rpn_score_outputs_1'],
+            box_outputs=model_outputs['rpn_box_outputs_1'],
+            labels=labels_1,
+            params=params
+        )
+        total_fast_rcnn_loss_1, fast_rcnn_class_loss_1, fast_rcnn_box_loss_1 = losses.fast_rcnn_loss(
+            class_outputs=model_outputs['class_outputs_1'],
+            box_outputs=model_outputs['box_outputs_1'],
+            class_targets=model_outputs['class_targets_1'],
+            box_targets=model_outputs['box_targets_1'],
+            params=params
+        )
+        mask_loss_1 = losses.mask_rcnn_loss(
+            mask_outputs=model_outputs['mask_outputs_1'],
+            mask_targets=model_outputs['mask_targets_1'],
+            select_class_targets=model_outputs['selected_class_targets_1'],
+            params=params
+        )
+        
+        l2_regularization_loss_1 = params['l2_weight_decay'] * tf.add_n([
+            tf.nn.l2_loss(v)
+            for v in gpu_1_vars
+            if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
+        ])
+
+        total_loss_1 = total_rpn_loss_1 + total_fast_rcnn_loss_1 + mask_loss_1 + l2_regularization_loss_1
+        
+        optimizer_1 = create_optimizer(learning_rate, params)
+        grads_and_vars_1 = optimizer_1.compute_gradients(total_loss_1, 
                                                   gpu_1_vars, 
                                                   colocate_gradients_with_ops=True)
+        gradients_1, variables_1 = zip(*grads_and_vars_1)
+        grads_and_vars_1 = []
+        for grad, var in zip(gradients_1, variables_1):
 
-    gradients_0, variables_0 = zip(*grads_and_vars_0)
-    gradients_1, variables_1 = zip(*grads_and_vars_1)
-    grads_and_vars_0 = []
-    grads_and_vars_1 = []
+            if grad is not None and any([pattern in var.name for pattern in ["bias", "beta"]]):
+                grad = 2.0 * grad
 
-    # Special treatment for biases (beta is named as bias in reference model)
-    # Reference: https://github.com/ddkang/Detectron/blob/80f3295308/lib/modeling/optimizer.py#L109
-    for grad, var in zip(gradients_0, variables_0):
-
-        if grad is not None and any([pattern in var.name for pattern in ["bias", "beta"]]):
-            grad = 2.0 * grad
-
-        grads_and_vars_0.append((grad, var))
-        
-    for grad, var in zip(gradients_1, variables_1):
-
-        if grad is not None and any([pattern in var.name for pattern in ["bias", "beta"]]):
-            grad = 2.0 * grad
-
-        grads_and_vars_1.append((grad, var))
-
-    train_op_0 = optimizer_0.apply_gradients(grads_and_vars_0, global_step=global_step)
-    train_op_1 = optimizer_1.apply_gradients(grads_and_vars_1, global_step=global_step)
-    return train_op_0, train_op_1, total_loss
+            grads_and_vars_1.append((grad, var))
+        train_op_1 = optimizer_1.apply_gradients(grads_and_vars_1, global_step=global_step)
+    
+    return train_op_0, train_op_1, total_loss_0, total_loss_1
