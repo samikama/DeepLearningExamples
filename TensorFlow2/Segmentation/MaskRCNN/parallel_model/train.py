@@ -63,10 +63,15 @@ tdf_iter_1 = train_tdf_1.make_initializable_iterator()
 features_0, labels_0 = tdf_iter_0.get_next()
 features_1, labels_1 = tdf_iter_1.get_next()
 
-import model
+import model_v2 as model
 
 
-train_op, total_loss = model.model(features_0, features_1, params, devices, labels_0)
+train_op_0, train_op_1, total_loss_0, total_loss_1 = model.model(features_0, 
+                                                                 features_1, 
+                                                                 params, 
+                                                                 devices, 
+                                                                 labels_0, 
+                                                                 labels_1)
 
 var_list_0 = load_weights.build_assigment_map('resnet50/')
 var_list_1 = load_weights.build_assigment_map('resnet50_1/')
@@ -81,10 +86,13 @@ with tf.Session() as sess:
     sess.run(tdf_iter_0.initializer)
     sess.run(tdf_iter_1.initializer)
     sess.run(var_initializer)
-    loss_history = []
+    loss_history_0 = []
+    loss_history_1 = []
     p_bar = tqdm(range(10000))
     for i in p_bar:
-        _, loss = sess.run([train_op, total_loss])
-        loss_history.append(loss)
-        ma_loss = mean(loss_history[-100:])
-        p_bar.set_description("Loss: {0:.4f}".format(ma_loss))
+        _, _, loss_0, loss_1 = sess.run([train_op_0, train_op_1, total_loss_0, total_loss_1])
+        loss_history_0.append(loss_0)
+        loss_history_1.append(loss_1)
+        ma_loss_0 = mean(loss_history_0[-100:])
+        ma_loss_1 = mean(loss_history_1[-100:])
+        p_bar.set_description("Loss 0: {0:.4f}, Loss 1: {1:.4f}".format(ma_loss_0, ma_loss_1))
