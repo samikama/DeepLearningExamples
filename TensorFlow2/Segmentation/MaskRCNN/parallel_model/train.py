@@ -10,8 +10,10 @@ sys.path.append('..')
 os.environ["TF_GPU_THREAD_MODE"]="gpu_private"
 os.environ["TF_GPU_THREAD_COUNT"]="1"
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
-os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
-
+#os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
+do_profile=True
+from tensorflow.python.profiler import profiler_v2 as tf_profiler
+from tensorflow.python.profiler.trace import Trace as prof_Trace
 import tensorflow.compat.v1 as tf
 tf.disable_eager_execution()
 tf.disable_v2_behavior()
@@ -86,6 +88,48 @@ _init_op_0, _init_feed_dict_0 = load_weights.assign_from_checkpoint(checkpoint_f
 _init_op_1, _init_feed_dict_1 = load_weights.assign_from_checkpoint(checkpoint_file, var_list_1)
 
 var_initializer = tf.global_variables_initializer()
+profile_base="/work/sami/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/Profiles"
+suffix=""
+xlaflags=os.environ.get("TF_XLA_FLAGS","")
+if "fusible" in xlaflags:
+    suffix+="_fusible"
+if "min_cluster_size" in xlaflags:
+    pos=xlaflags.find("min_cluster_size=")
+    if pos >=0:
+        substr=xlaflags[pos+len("min_cluster_size=")]
+        if substr.find(" ") == -1:
+            suffix+="_csize"+substr
+        else:
+            suffix+="_csize"+substr[:substr.find(" ")]
+
+if os.environ.get("TF_GPU_THREAD_MODE") == 'gpu_private':
+    suffix+="_privThr_"+os.environ.get("TF_GPU_THREAD_COUNT","2")
+
+def do_step_profile(profile_path,sess,stepstr,progressbar,fetch_ops):
+    if do_profile:
+        tf_profiler.start(profile_path)
+        print(f"Saving profile to {profile_path}")
+        for i in progressbar:
+            with prof_Trace(f"{stepstr}_train",step_num=i,_r=1):
+                _,_, loss_0,loss_1 = sess.run(fetch_ops)
+        loss_history_0.append(loss_0)
+        loss_history_1.append(loss_1)
+        ma_loss_0 = mean(loss_history_0[-100:])
+        ma_loss_1 = mean(loss_history_1[-100:])
+        p_bar.set_description("Loss 0: {0:.4f}, Loss 1: {1:.4f}".format(ma_loss_0, ma_loss_1))
+        tf_profiler.stop()
+    else:
+        for i in progressbar:
+    #       with tf.profiler.experimental.Trace(f"{stepstr}_train",step_num=i,_r=1):
+            _,_, loss_0,loss_1 = sess.run(fetch_ops)
+        loss_history_0.append(loss_0)
+        loss_history_1.append(loss_1)
+        ma_loss_0 = mean(loss_history_0[-100:])
+        ma_loss_1 = mean(loss_history_1[-100:])
+        p_bar.set_description("Loss 0: {0:.4f}, Loss 1: {1:.4f}".format(ma_loss_0, ma_loss_1))
+if "TFLocal" in tf.__file__:
+    profile_path=os.path.join(profile_base,f"LocalBuild_2.4{suffix}")
+    stepstr="local"
 with tf.Session() as sess:
     sess.run(_init_op_0, _init_feed_dict_0)
     sess.run(_init_op_1, _init_feed_dict_1)
@@ -96,20 +140,23 @@ with tf.Session() as sess:
     p_bar = tqdm(range(20))
     timings=[]
     for i in p_bar:
-        _,_, loss_0,loss_1 = sess.run([train_op, total_loss])
+        _,_, loss_0,loss_1 = sess.run([train_op_0,train_op_1, total_loss_0,total_loss_1])
     loss_history_0 = []
     loss_history_1 = []
     p_bar = tqdm(range(200))
-    for i in p_bar:
-        tstart=time.perf_counter()
-        _, _, loss_0, loss_1 = sess.run([train_op_0, train_op_1, total_loss_0, total_loss_1])
-        delta_t=time.perf_counter()-tstart
-        timings.append(delta_t)
-        loss_history_0.append(loss_0)
-        loss_history_1.append(loss_1)
-        ma_loss_0 = mean(loss_history_0[-100:])
-        ma_loss_1 = mean(loss_history_1[-100:])
-        p_bar.set_description("Loss 0: {0:.4f}, Loss 1: {1:.4f}".format(ma_loss_0, ma_loss_1))
-    timings=np.asarray(timings,np.float)
-    print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
+    if do_profile:
+        do_step_profile(profile_path,sess,stepstr,p_bar,[train_op_0,train_op_1, total_loss_0,total_loss_1])
+    else:
+        for i in p_bar:
+            tstart=time.perf_counter()
+            _, _, loss_0, loss_1 = sess.run([train_op_0, train_op_1, total_loss_0, total_loss_1])
+            delta_t=time.perf_counter()-tstart
+            timings.append(delta_t)
+            loss_history_0.append(loss_0)
+            loss_history_1.append(loss_1)
+            ma_loss_0 = mean(loss_history_0[-100:])
+            ma_loss_1 = mean(loss_history_1[-100:])
+            p_bar.set_description("Loss 0: {0:.4f}, Loss 1: {1:.4f}".format(ma_loss_0, ma_loss_1))
+        timings=np.asarray(timings,np.float)
+        print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
     
