@@ -7,8 +7,8 @@ from tqdm import tqdm
 import numpy as np
 sys.path.append('..')
 
-os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
-os.environ["TF_GPU_THREAD_COUNT"] = "2"
+# os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
+# os.environ["TF_GPU_THREAD_COUNT"] = "1"
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
 #os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
 do_profile = True
@@ -161,7 +161,7 @@ def do_step_profile(profile_path, sess, stepstr, progressbar, fetch_ops):
 
 if "TFLocal" in tf.__file__:
   profile_path = os.path.join(profile_base,
-                              f"LocalBuild_2.4_split_model{suffix}")
+                              f"LocalBuild_2.4_split_model_roi_hwc{suffix}")
   stepstr = "local"
 with tf.Session() as sess:
   sess.run(_init_op_0, _init_feed_dict_0)

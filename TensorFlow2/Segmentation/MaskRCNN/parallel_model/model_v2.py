@@ -195,7 +195,7 @@ def forward(features_0, features_1, params, devices, labels_0=None, labels_1=Non
             rpn_nms_threshold=rpn_nms_threshold,
             rpn_min_size=params['rpn_min_size']
         )
-    
+    is_mlcar_transposed=False
     # No GPU op for sampling
     if is_training:
         rpn_box_rois_0 = tf.stop_gradient(rpn_box_rois_0)
@@ -229,11 +229,18 @@ def forward(features_0, features_1, params, devices, labels_0=None, labels_1=Non
     # Run both heads on first GPU
     with tf.device(devices[0].name):
         # Performs multi-level RoIAlign.
-        box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+        # box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+        #     features=fpn_feats_0,
+        #     boxes=rpn_box_rois_0,
+        #     output_size=7,
+        #     is_gpu_inference=is_gpu_inference
+        # )
+        box_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
             features=fpn_feats_0,
             boxes=rpn_box_rois_0,
             output_size=7,
-            is_gpu_inference=is_gpu_inference
+            is_gpu_inference=is_gpu_inference,
+            is_transposed=is_mlcar_transposed
         )
 
         MODELS["Box_Head_0"] = heads.Box_Head_Model(
@@ -301,11 +308,18 @@ def forward(features_0, features_1, params, devices, labels_0=None, labels_1=Non
 
             class_indices_0 = tf.cast(selected_class_targets_0, dtype=tf.int32)
             
-        mask_roi_features_0 = spatial_transform_ops.multilevel_crop_and_resize(
+        # mask_roi_features_0 = spatial_transform_ops.multilevel_crop_and_resize(
+        #     features=fpn_feats_0,
+        #     boxes=selected_box_rois_0,
+        #     output_size=14,
+        #     is_gpu_inference=is_gpu_inference
+        # )
+        mask_roi_features_0 = spatial_transform_ops.custom_multilevel_crop_and_resize(
             features=fpn_feats_0,
             boxes=selected_box_rois_0,
             output_size=14,
-            is_gpu_inference=is_gpu_inference
+            is_gpu_inference=is_gpu_inference,
+            is_transposed=is_mlcar_transposed
         )
         
         MODELS["Mask_Head_0"] = heads.Mask_Head_Model(
@@ -343,11 +357,19 @@ def forward(features_0, features_1, params, devices, labels_0=None, labels_1=Non
     # Run both heads on second GPU
     with tf.device(devices[1].name):
         # Performs multi-level RoIAlign.
-        box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+        # box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+        #     features=fpn_feats_1,
+        #     boxes=rpn_box_rois_1,
+        #     output_size=7,
+        #     is_gpu_inference=is_gpu_inference
+        # )
+
+        box_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
             features=fpn_feats_1,
             boxes=rpn_box_rois_1,
             output_size=7,
-            is_gpu_inference=is_gpu_inference
+            is_gpu_inference=is_gpu_inference,
+            is_transposed=is_mlcar_transposed
         )
 
         MODELS["Box_Head_1"] = heads.Box_Head_Model(
@@ -415,11 +437,18 @@ def forward(features_0, features_1, params, devices, labels_0=None, labels_1=Non
 
             class_indices_1 = tf.cast(selected_class_targets_1, dtype=tf.int32)
             
-        mask_roi_features_1 = spatial_transform_ops.multilevel_crop_and_resize(
+        # mask_roi_features_1 = spatial_transform_ops.multilevel_crop_and_resize(
+        #     features=fpn_feats_1,
+        #     boxes=selected_box_rois_1,
+        #     output_size=14,
+        #     is_gpu_inference=is_gpu_inference
+        # )
+        mask_roi_features_1 = spatial_transform_ops.custom_multilevel_crop_and_resize(
             features=fpn_feats_1,
             boxes=selected_box_rois_1,
             output_size=14,
-            is_gpu_inference=is_gpu_inference
+            is_gpu_inference=is_gpu_inference,
+            is_transposed=is_mlcar_transposed
         )
         
         MODELS["Mask_Head_1"] = heads.Mask_Head_Model(
