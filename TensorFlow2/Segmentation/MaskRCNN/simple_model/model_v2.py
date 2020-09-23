@@ -45,8 +45,8 @@ from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 from mask_rcnn.utils.distributed_utils import MPI_local_rank
 
-from mask_rcnn.utils.meters import StandardMeter
-from mask_rcnn.utils.metric_tracking import register_metric
+# from mask_rcnn.utils.meters import StandardMeter
+# from mask_rcnn.utils.metric_tracking import register_metric
 
 from mask_rcnn.utils.lazy_imports import LazyImport
 hvd = LazyImport("horovod.tensorflow")
@@ -199,12 +199,23 @@ class MRCNN(tf.keras.Model):
             )
 
         # Performs multi-level RoIAlign.
-        box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
-            features=fpn_feats,
-            boxes=rpn_box_rois,
-            output_size=7,
-            is_gpu_inference=is_gpu_inference
-        )
+        use_transposed_features=params["use_transposed_features"]
+        use_default_roi_align=params["use_default_roi_align"]
+        if use_default_roi_align:
+            box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+                features=fpn_feats,
+                boxes=rpn_box_rois,
+                output_size=7,
+                is_gpu_inference=is_gpu_inference
+            )
+        else:
+            box_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
+                features=fpn_feats,
+                boxes=rpn_box_rois,
+                output_size=7,
+                is_gpu_inference=is_gpu_inference,
+                is_transposed=use_transposed_features
+            )
         
         class_outputs, box_outputs, _ = self.box_head(inputs=box_roi_features)
 
@@ -281,12 +292,21 @@ class MRCNN(tf.keras.Model):
 
             class_indices = tf.cast(selected_class_targets, dtype=tf.int32)
 
-        mask_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
-            features=fpn_feats,
-            boxes=selected_box_rois,
-            output_size=14,
-            is_gpu_inference=is_gpu_inference
-        )
+        if use_default_roi_align:
+            mask_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+                features=fpn_feats,
+                boxes=selected_box_rois,
+                output_size=14,
+                is_gpu_inference=is_gpu_inference
+            )
+        else:
+            mask_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
+                features=fpn_feats,
+                boxes=selected_box_rois,
+                output_size=14,
+                is_gpu_inference=is_gpu_inference,
+                is_transposed=use_transposed_features
+            )
         
         mask_outputs = self.mask_head(inputs=mask_roi_features, class_indices=class_indices)
 

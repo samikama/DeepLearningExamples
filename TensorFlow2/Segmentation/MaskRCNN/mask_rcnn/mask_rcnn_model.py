@@ -45,8 +45,8 @@ from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 from mask_rcnn.utils.distributed_utils import MPI_local_rank
 
-from mask_rcnn.utils.meters import StandardMeter
-from mask_rcnn.utils.metric_tracking import register_metric
+#from mask_rcnn.utils.meters import StandardMeter
+#from mask_rcnn.utils.metric_tracking import register_metric
 
 from mask_rcnn.utils.lazy_imports import LazyImport
 hvd = LazyImport("horovod.tensorflow")
@@ -486,22 +486,22 @@ def _model_fn(features, labels, mode, params):
 
     replica_id = tf.distribute.get_replica_context().replica_id_in_sync_group
 
-    if not isinstance(replica_id, tf.Tensor) or tf.get_static_value(replica_id) == 0:
+    # if not isinstance(replica_id, tf.Tensor) or tf.get_static_value(replica_id) == 0 and False:
 
-        register_metric(name="L2 loss", tensor=l2_regularization_loss, aggregator=StandardMeter())
-        register_metric(name="Mask loss", tensor=mask_loss, aggregator=StandardMeter())
-        register_metric(name="Total loss", tensor=total_loss, aggregator=StandardMeter())
+    #     register_metric(name="L2 loss", tensor=l2_regularization_loss, aggregator=StandardMeter())
+    #     register_metric(name="Mask loss", tensor=mask_loss, aggregator=StandardMeter())
+    #     register_metric(name="Total loss", tensor=total_loss, aggregator=StandardMeter())
 
-        register_metric(name="RPN box loss", tensor=rpn_box_loss, aggregator=StandardMeter())
-        register_metric(name="RPN score loss", tensor=rpn_score_loss, aggregator=StandardMeter())
-        register_metric(name="RPN total loss", tensor=total_rpn_loss, aggregator=StandardMeter())
+    #     register_metric(name="RPN box loss", tensor=rpn_box_loss, aggregator=StandardMeter())
+    #     register_metric(name="RPN score loss", tensor=rpn_score_loss, aggregator=StandardMeter())
+    #     register_metric(name="RPN total loss", tensor=total_rpn_loss, aggregator=StandardMeter())
 
-        register_metric(name="FastRCNN class loss", tensor=fast_rcnn_class_loss, aggregator=StandardMeter())
-        register_metric(name="FastRCNN box loss", tensor=fast_rcnn_box_loss, aggregator=StandardMeter())
-        register_metric(name="FastRCNN total loss", tensor=total_fast_rcnn_loss, aggregator=StandardMeter())
+    #     register_metric(name="FastRCNN class loss", tensor=fast_rcnn_class_loss, aggregator=StandardMeter())
+    #     register_metric(name="FastRCNN box loss", tensor=fast_rcnn_box_loss, aggregator=StandardMeter())
+    #     register_metric(name="FastRCNN total loss", tensor=total_fast_rcnn_loss, aggregator=StandardMeter())
 
-        register_metric(name="Learning rate", tensor=learning_rate, aggregator=StandardMeter())
-        pass
+    #     register_metric(name="Learning rate", tensor=learning_rate, aggregator=StandardMeter())
+    #     pass
     return tf.estimator.EstimatorSpec(
         mode=mode,
         loss=total_loss,
