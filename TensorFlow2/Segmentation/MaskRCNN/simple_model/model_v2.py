@@ -209,6 +209,7 @@ class MRCNN(tf.keras.Model):
                 is_gpu_inference=is_gpu_inference
             )
         else:
+            print("*** SAMI ***"*20,"using custom roi align with layout is transposed=",use_transposed_features)
             box_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
                 features=fpn_feats,
                 boxes=rpn_box_rois,

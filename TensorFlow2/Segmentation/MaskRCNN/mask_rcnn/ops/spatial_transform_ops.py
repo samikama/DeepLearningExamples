@@ -301,7 +301,10 @@ def custom_multilevel_crop_and_resize(features,
                                        max_feature_height, max_feature_width))
 
     features_all = tf.stack(features_all, axis=1)
-    input = tf.transpose(features_all, [0, 1, 4, 2, 3])
+    if is_transposed:
+      inp = tf.transpose(features_all, [0, 1, 4, 2, 3])
+    else:
+      inp=features_all
     rois = boxes
     spatial_scale = tf.constant(1.0)
     min_level_tensor = tf.constant(min_level)
@@ -312,7 +315,7 @@ def custom_multilevel_crop_and_resize(features,
     # TODO(sami) add b,l,h,w,c kernel
     if is_transposed:
       return tf.transpose(
-          tf.image.roi_align(input=input,
+          tf.image.roi_align(input=inp,
                              rois=rois,
                              pooled_height=output_size,
                              pooled_width=output_size,
@@ -324,7 +327,7 @@ def custom_multilevel_crop_and_resize(features,
                              canonical_level=canonical_level,
                              data_format="NCHW"), [0, 1, 3, 4, 2])
     else:
-      return tf.image.roi_align(input=input,
+      return tf.image.roi_align(input=inp,
                                 rois=rois,
                                 pooled_height=output_size,
                                 pooled_width=output_size,

@@ -9,11 +9,12 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 sys.path.append('..')
 
-# os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
-# os.environ["TF_GPU_THREAD_COUNT"] = "1"
+os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
+os.environ["TF_GPU_THREAD_COUNT"] = "1"
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
-#os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
-do_profile=True
+os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
+#os.environ["TF_CPP_VMODULE"] = 'roi_align_op=2'
+do_profile=False
 
 
 os.environ['CUDA_CACHE_DISABLE'] = '0'
@@ -182,7 +183,7 @@ if "TFLocal" in tf.__file__:
 stepstr = "local"
 steps = 20
 
-if hvd.rank() == 0:
+if hvd.rank() == 0 and False:
   p_bar = tqdm(range(steps))
 else:
   p_bar = range(steps)
@@ -197,16 +198,17 @@ for i in p_bar:
   smoothed_loss = mean(loss_history[-50:])
   smoothed_rpn_loss = mean(rpn_loss_history[-50:])
   smoothed_rcnn_loss = mean(rcnn_loss_history[-50:])
-  if hvd.rank() == 0:
-    p_bar.set_description(
-        "L: {0:.4f}, R: {1:.4f}, C: {2:.4f}, LR: {3:.4f}".format(
-            smoothed_loss, smoothed_rpn_loss, smoothed_rcnn_loss, outputs[6]))
-steps=200
+  # if hvd.rank() == 0:
+  #   p_bar.set_description(
+  #       "L: {0:.4f}, R: {1:.4f}, C: {2:.4f}, LR: {3:.4f}".format(
+  #           smoothed_loss, smoothed_rpn_loss, smoothed_rcnn_loss, outputs[6]))
+steps=4000
 p_bar=tqdm(range(steps))
 loss_history = []
 rpn_loss_history = []
 rcnn_loss_history = []
 timings=[]
+#sys.exit()
 if do_profile:
   do_step_profile(profile_path,sess,stepstr,p_bar,train_outputs)
 else:
