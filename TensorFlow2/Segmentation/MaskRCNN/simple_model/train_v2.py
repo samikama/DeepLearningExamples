@@ -68,12 +68,12 @@ params['use_batched_nms'] = False
 params['use_custom_box_proposals_op'] = True
 params['amp'] = True
 params['include_groundtruth_in_features'] = True
-params['use_default_roi_align'] = True
-params['use_transposed_features'] = False
+params['use_default_roi_align'] = False
+params['use_transposed_features'] = True
 
 orig_loader = dataloader.InputReader(orig_file_pattern, use_instance_mask=True)
 orig_tdf = orig_loader(data_params)
-orig_iter = orig_tdf.make_initializable_iterator()
+orig_iter = tf.data.make_initializable_iterator(orig_tdf)
 orig_features, orig_labels = orig_iter.get_next()
 
 mask_rcnn = model_v2.MRCNN(params)
@@ -179,7 +179,7 @@ outputs = sess.run(train_outputs)
 profile_base = "/work/sami/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/Profiles"
 if "TFLocal" in tf.__file__:
   profile_path = os.path.join(profile_base,
-                              f"LocalBuild_2.4_tf1_model{suffix}")
+                              f"Ampere_2.4_tf1_model{suffix}")
 stepstr = "local"
 steps = 20
 
