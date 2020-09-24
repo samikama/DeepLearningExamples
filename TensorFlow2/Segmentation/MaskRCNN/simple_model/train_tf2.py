@@ -9,7 +9,7 @@ import horovod.tensorflow as hvd
 hvd.init()
 
 physical_devices = tf.config.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(physical_devices[hvd.rank()], True)
+# tf.config.experimental.set_memory_growth(physical_devices[hvd.rank()], True)
 tf.config.set_visible_devices(physical_devices[hvd.rank()], 'GPU')
 devices = tf.config.list_logical_devices('GPU')
 
