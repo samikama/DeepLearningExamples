@@ -23,46 +23,46 @@ os.environ['TF_ADJUST_HUE_FUSED'] = '1'
 os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
 os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
+import tensorflow as tf
 from tensorflow.python.profiler import profiler_v2 as tf_profiler
 from tensorflow.python.profiler.trace import Trace as prof_Trace
 
-import tensorflow.compat.v1 as tf
 
-tf.disable_eager_execution()
-tf.disable_v2_behavior()
-tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
+from tensorflow.keras.mixed_precision import experimental as mixed_precision
+
 
 import horovod.tensorflow as hvd
 hvd.init()
-
 physical_devices = tf.config.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(physical_devices[hvd.rank()], True)
+# tf.config.experimental.set_memory_growth(physical_devices[hvd.rank()], True)
 tf.config.set_visible_devices(physical_devices[hvd.rank()], 'GPU')
 devices = tf.config.list_logical_devices('GPU')
 
+tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
+from mask_rcnn.tf2_model import MaskRCNN
 from mask_rcnn.hyperparameters import dataset_params
 from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn import dataset_utils
-from mask_rcnn import dataloader
-from mask_rcnn import mask_rcnn_model
-import load_weights, model_v2
+from mask_rcnn.training import losses, learning_rates
+from simple_model.tf2 import weight_loader, train, scheduler
+from simple_model import model_v2
 
-train_file_pattern = '/home/ubuntu/data/coco/tf_record/train*'
-orig_file_pattern = '/data/coco/coco-2017/tfrecord/train*'
 batch_size = 1
+images = 118287
+steps_per_epoch = images//(batch_size * hvd.size())
 data_params = dataset_params.get_data_params()
 params = mask_rcnn_params.default_config().values()
+
+train_file_pattern = '/data/coco/coco-2017/tfr_anchor/train*'
 data_params['batch_size'] = batch_size
 params['finetune_bn'] = False
 params['train_batch_size'] = batch_size
 params['l2_weight_decay'] = 1e-4
-params['init_learning_rate'] = 4e-3 * batch_size * hvd.size()
-params['warmup_learning_rate'] = 4e-4 * batch_size * hvd.size()
-params['warmup_steps'] = 1000
-params['learning_rate_steps'] = [30000, 40000]
-params['learning_rate_levels'] = [
-    4e-4 * batch_size * hvd.size(), 4e-5 * batch_size * hvd.size()
-]
+params['init_learning_rate'] = 2e-3 * batch_size * hvd.size()
+params['warmup_learning_rate'] = 2e-4 * batch_size * hvd.size()
+params['warmup_steps'] = 2000//hvd.size()
+params['learning_rate_steps'] = [steps_per_epoch * 9, steps_per_epoch * 11]
+params['learning_rate_levels'] = [2e-4 * batch_size, 2e-5 * batch_size]
 params['momentum'] = 0.9
 params['use_batched_nms'] = False
 params['use_custom_box_proposals_op'] = True
@@ -71,33 +71,42 @@ params['include_groundtruth_in_features'] = True
 params['use_default_roi_align'] = False
 params['use_transposed_features'] = True
 
-orig_loader = dataloader.InputReader(orig_file_pattern, use_instance_mask=True)
-orig_tdf = orig_loader(data_params)
-orig_iter = tf.data.make_initializable_iterator(orig_tdf)
-orig_features, orig_labels = orig_iter.get_next()
+loader = dataset_utils.FastDataLoader(train_file_pattern, data_params)
+train_tdf = loader(data_params)
+train_tdf = train_tdf.apply(tf.data.experimental.prefetch_to_device(devices[0].name, 
+                                                                    buffer_size=tf.data.experimental.AUTOTUNE))
+train_iter = iter(train_tdf)
 
 mask_rcnn = model_v2.MRCNN(params)
+features, labels = next(train_iter)
+model_outputs = mask_rcnn(features, labels, params, is_training=True)
 
-train_outputs = model_v2.model_fn(orig_features,
-                                  orig_labels,
-                                  params,
-                                  mask_rcnn,
-                                  is_training=True)
+weight_loader.load_resnet_checkpoint(mask_rcnn, '../weights/resnet/resnet-nhwc-2018-02-07/')
 
-# predictions = model_v2.model_fn(orig_features,
-#                                 orig_labels,
-#                                 params,
-#                                 mask_rcnn,
-#                                 is_training=False)
-
-var_list = load_weights.build_assigment_map('mrcnn/resnet50/')
-checkpoint_file = tf.train.latest_checkpoint(
-    '../weights/resnet/resnet-nhwc-2018-02-07/')
-_init_op, _init_feed_dict = load_weights.assign_from_checkpoint(
-    checkpoint_file, var_list)
-xlaflags = os.environ.get("TF_XLA_FLAGS", "")
+schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(params['learning_rate_steps'],
+                                                                [params['init_learning_rate']] \
+                                                                + params['learning_rate_levels'])
+schedule = scheduler.WarmupScheduler(schedule, params['warmup_learning_rate'],
+                                     params['warmup_steps'])
+optimizer = tf.keras.optimizers.SGD(schedule, momentum=0.9)
+optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(optimizer, 'dynamic')
 
 
+
+@tf.function
+def train_step(features, labels, params, model, opt, first=False):
+    with tf.GradientTape() as tape:
+        total_loss = train.train_forward(features, labels, params, model)
+        scaled_loss = optimizer.get_scaled_loss(total_loss)
+    tape = hvd.DistributedGradientTape(tape)
+    scaled_gradients = tape.gradient(scaled_loss, model.trainable_variables)
+    gradients = optimizer.get_unscaled_gradients(scaled_gradients)
+    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    if first:
+        hvd.broadcast_variables(model.variables, 0)
+        hvd.broadcast_variables(opt.variables(), root_rank=0)
+    return total_loss
+_ = train_step(features, labels, params, mask_rcnn, optimizer, first=True)
 def get_env_value(env_str, key):
   pos = env_str.find(key)
   if pos >= 0:
@@ -107,7 +116,7 @@ def get_env_value(env_str, key):
     else:
       return substr[:substr.find(" ")]
   return None
-
+xlaflags = os.environ.get("TF_XLA_FLAGS", "")
 suffix=""
 if not params["use_default_roi_align"]:
   suffix+="_roi"
@@ -125,83 +134,52 @@ if "min_cluster_size" in xlaflags:
   if val:
     suffix += "_csize" + val
 
-  # pos = xlaflags.find("min_cluster_size=")
-  # if pos >= 0:
-  #   substr = xlaflags[pos + len("min_cluster_size=")]
-  #   if substr.find(" ") == -1:
-  #     suffix += "_csize" + substr
-  #   else:
-  #     suffix += "_csize" + substr[:substr.find(" ")]
 
 if os.environ.get("TF_GPU_THREAD_MODE") == 'gpu_private':
   suffix += "_privThr_" + os.environ.get("TF_GPU_THREAD_COUNT", "2")
 
 
-def do_step_profile(profile_path, sess, stepstr, progressbar, fetch_ops):
+def run_loop(progressbar):
+    loss_history=[]
+    for i in progressbar:
+      features,labels=next(train_iter)
+      total_loss=train_step(features,labels,params,mask_rcnn,optimizer)
+      loss_history.append(total_loss.numpy())
+      smoothed_loss = mean(loss_history[-50:])
+      progressbar.set_description(
+          "L: {0:.4f},  LR: {1:.4f}".format(
+              smoothed_loss,  schedule(optimizer.iterations)))
+
+def do_step_profile(profile_path, stepstr, progressbar):
   if do_profile:
+    loss_history=[]
     tf_profiler.start(profile_path)
     print(f"Saving profile to {profile_path}")
     for i in progressbar:
       with prof_Trace(f"{stepstr}_train", step_num=i, _r=1):
-        outputs = sess.run(fetch_ops)
-      loss_history.append(outputs[1])
-      rpn_loss_history.append(outputs[2])
-      rcnn_loss_history.append(outputs[4])
+        features,labels=next(train_iter)
+        total_loss=train_step(features,labels,params,mask_rcnn,optimizer)
+      loss_history.append(total_loss.numpy())
       smoothed_loss = mean(loss_history[-50:])
-      smoothed_rpn_loss = mean(rpn_loss_history[-50:])
-      smoothed_rcnn_loss = mean(rcnn_loss_history[-50:])
       progressbar.set_description(
-          "L: {0:.4f}, R: {1:.4f}, C: {2:.4f}, LR: {3:.4f}".format(
-              smoothed_loss, smoothed_rpn_loss, smoothed_rcnn_loss, outputs[6]))
+          "L: {0:.4f},  LR: {1:.4f}".format(
+              smoothed_loss,  schedule(optimizer.iterations)))
     tf_profiler.stop()
   else:
-    for i in progressbar:
-      #       with tf.profiler.experimental.Trace(f"{stepstr}_train",step_num=i,_r=1):
-      outputs = sess.run(fetch_ops)
-      loss_history.append(outputs[1])
-      rpn_loss_history.append(outputs[2])
-      rcnn_loss_history.append(outputs[4])
-      smoothed_loss = mean(loss_history[-50:])
-      smoothed_rpn_loss = mean(rpn_loss_history[-50:])
-      smoothed_rcnn_loss = mean(rcnn_loss_history[-50:])
-      progressbar.set_description(
-          "L: {0:.4f}, R: {1:.4f}, C: {2:.4f}, LR: {3:.4f}".format(
-              smoothed_loss, smoothed_rpn_loss, smoothed_rcnn_loss, outputs[6]))
+    run_loop(progressbar)
 
-
-sess = tf.Session()
-sess.run(orig_iter.initializer)
-sess.run(tf.global_variables_initializer())
-sess.run(_init_op, _init_feed_dict)
-
-outputs = sess.run(train_outputs)
-# pred = sess.run(predictions)
 profile_base = "/work/sami/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/Profiles"
 if "TFLocal" in tf.__file__:
   profile_path = os.path.join(profile_base,
-                              f"Ampere_2.4_tf1_model{suffix}")
+                              f"Ampere_2.4_tf2_model{suffix}")
 stepstr = "local"
 steps = 20
 
-if hvd.rank() == 0 and False:
+if hvd.rank() == 0:
   p_bar = tqdm(range(steps))
 else:
   p_bar = range(steps)
-loss_history = []
-rpn_loss_history = []
-rcnn_loss_history = []
-for i in p_bar:
-  outputs = sess.run(train_outputs)
-  loss_history.append(outputs[1])
-  rpn_loss_history.append(outputs[2])
-  rcnn_loss_history.append(outputs[4])
-  smoothed_loss = mean(loss_history[-50:])
-  smoothed_rpn_loss = mean(rpn_loss_history[-50:])
-  smoothed_rcnn_loss = mean(rcnn_loss_history[-50:])
-  # if hvd.rank() == 0:
-  #   p_bar.set_description(
-  #       "L: {0:.4f}, R: {1:.4f}, C: {2:.4f}, LR: {3:.4f}".format(
-  #           smoothed_loss, smoothed_rpn_loss, smoothed_rcnn_loss, outputs[6]))
+run_loop(p_bar)
 steps=4000
 p_bar=tqdm(range(steps))
 loss_history = []
@@ -210,22 +188,19 @@ rcnn_loss_history = []
 timings=[]
 #sys.exit()
 if do_profile:
-  do_step_profile(profile_path,sess,stepstr,p_bar,train_outputs)
+  do_step_profile(profile_path,stepstr,p_bar)
 else:
   for i in p_bar:
     tstart = time.perf_counter()
-    outputs = sess.run(train_outputs)
+    features,labels=next(train_iter)
+    total_loss=train_step(features,labels,params,mask_rcnn,optimizer)
     delta_t = time.perf_counter() - tstart
     timings.append(delta_t)
-    loss_history.append(outputs[1])
-    rpn_loss_history.append(outputs[2])
-    rcnn_loss_history.append(outputs[4])
+    loss_history.append(total_loss.numpy())
     smoothed_loss = mean(loss_history[-50:])
-    smoothed_rpn_loss = mean(rpn_loss_history[-50:])
-    smoothed_rcnn_loss = mean(rcnn_loss_history[-50:])
     if hvd.rank() == 0:
       p_bar.set_description(
-          "L: {0:.4f}, R: {1:.4f}, C: {2:.4f}, LR: {3:.4f}".format(
-              smoothed_loss, smoothed_rpn_loss, smoothed_rcnn_loss, outputs[6]))
+          "L: {0:.4f},  LR: {1:.4f}".format(
+              smoothed_loss,  schedule(optimizer.iterations)))
   timings = np.asarray(timings, np.float)
   print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
