@@ -38,11 +38,11 @@ data_params['batch_size'] = batch_size
 params['finetune_bn'] = False
 params['train_batch_size'] = batch_size
 params['l2_weight_decay'] = 1e-4
-params['init_learning_rate'] = 1e-3 * batch_size * hvd.size()
-params['warmup_learning_rate'] = 1e-4 * batch_size * hvd.size()
+params['init_learning_rate'] = 2e-3 * batch_size * hvd.size()
+params['warmup_learning_rate'] = 2e-4 * batch_size * hvd.size()
 params['warmup_steps'] = 2000//hvd.size()
 params['learning_rate_steps'] = [steps_per_epoch * 9, steps_per_epoch * 11]
-params['learning_rate_levels'] = [1e-4 * batch_size, 1e-5 * batch_size]
+params['learning_rate_levels'] = [2e-4 * batch_size, 2e-5 * batch_size]
 params['momentum'] = 0.9
 params['use_batched_nms'] = False
 params['use_custom_box_proposals_op'] = True
@@ -71,18 +71,20 @@ optimizer = tf.keras.optimizers.SGD(schedule, momentum=0.9)
 optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(optimizer, 'dynamic')
 
 @tf.function
-def train_step(features, labels, params, model):
+def train_step(features, labels, params, model, opt, first=False):
     with tf.GradientTape() as tape:
         total_loss = train.train_forward(features, labels, params, model)
         scaled_loss = optimizer.get_scaled_loss(total_loss)
+    tape = hvd.DistributedGradientTape(tape)
     scaled_gradients = tape.gradient(scaled_loss, model.trainable_variables)
     gradients = optimizer.get_unscaled_gradients(scaled_gradients)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    if first:
+        hvd.broadcast_variables(model.variables, 0)
+        hvd.broadcast_variables(opt.variables(), root_rank=0)
     return total_loss
 
-_ = train_step(features, labels, params, mask_rcnn)
-
-hvd.broadcast_variables(mask_rcnn.variables, 0)
+_ = train_step(features, labels, params, mask_rcnn, optimizer, first=True)
 
 if hvd.rank()==0:
     p_bar = tqdm(range(steps_per_epoch))
@@ -91,7 +93,7 @@ else:
     p_bar = range(steps_per_epoch)
 for i in p_bar:
     features, labels = next(train_iter)
-    total_loss = train_step(features, labels, params, mask_rcnn)
+    total_loss = train_step(features, labels, params, mask_rcnn, optimizer)
     if hvd.rank()==0:
         loss_history.append(total_loss.numpy())
         smoothed_loss = mean(loss_history[-50:])
