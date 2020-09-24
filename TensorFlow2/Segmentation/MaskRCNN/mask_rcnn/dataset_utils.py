@@ -343,11 +343,10 @@ class PreprocessDataset(object):
         return padded_data
     
     def get_image_info(self, original_size, image_size):
-        scale_factor = image_size[0]/original_size[0]
         image_info = tf.stack([
-            tf.cast(scale_factor, dtype=tf.float32),
-            tf.cast(scale_factor, dtype=tf.float32),
-            tf.cast(1.0/scale_factor, dtype=tf.float32),
+            tf.cast(image_size[0], dtype=tf.float32),
+            tf.cast(image_size[1], dtype=tf.float32),
+            tf.cast(original_size[0]/image_size[0], dtype=tf.float32),
             tf.cast(original_size[0], dtype=tf.float32),
             tf.cast(original_size[1], dtype=tf.float32)])
         return image_info
@@ -424,9 +423,9 @@ class PreprocessDataset(object):
         gt_boxes = []
         for annot in annotations:
             if self.include_crowd:
-                gt_boxes.append(tf.cast(tf.convert_to_tensor(annot['bbox']), tf.float32) * image_info[0])
+                gt_boxes.append(tf.cast(tf.convert_to_tensor(annot['bbox']), tf.float32) * (1/image_info[2]))
             elif not annot['iscrowd']:
-                gt_boxes.append(tf.cast(tf.convert_to_tensor(annot['bbox']), tf.float32) * image_info[0])
+                gt_boxes.append(tf.cast(tf.convert_to_tensor(annot['bbox']), tf.float32) * (1/image_info[2]))
         gt_boxes = tf.stack(gt_boxes)
         gt_boxes = tf.transpose(tf.stack([gt_boxes[:,1],
                                            gt_boxes[:,0],

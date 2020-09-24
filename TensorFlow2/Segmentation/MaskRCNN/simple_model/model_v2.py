@@ -124,7 +124,7 @@ class MRCNN(tf.keras.Model):
                                                 trainable=is_training,
                                                 name="mask_head"
                                             )
-    def call(self, features, params, labels=None, is_training=True):
+    def call(self, features, labels, params, is_training=True):
         model_outputs = {}
         is_gpu_inference = not is_training and params['use_batched_nms']
         batch_size, image_height, image_width, _ = features['images'].get_shape().as_list()
@@ -225,8 +225,8 @@ class MRCNN(tf.keras.Model):
                 generate_detections_fn = postprocess_ops.generate_detections_gpu
 
             else:
-                generate_detections_fn = postprocess_ops.generate_detections_tpu
-
+                generate_detections_fn = postprocess_ops.generate_detections_gpu
+            
             detections = generate_detections_fn(
                 class_outputs=class_outputs,
                 box_outputs=box_outputs,
@@ -273,13 +273,7 @@ class MRCNN(tf.keras.Model):
         if not is_training:
             selected_box_rois = model_outputs['detection_boxes']
             class_indices = model_outputs['detection_classes']
-
-            # If using GPU for inference, delay the cast until when Gather ops show up
-            # since GPU inference supports float point better.
-            # TODO(laigd): revisit this when newer versions of GPU libraries is
-            # released.
-            if not params['use_batched_nms']:
-                class_indices = tf.cast(class_indices, dtype=tf.int32)
+            class_indices = tf.cast(class_indices, dtype=tf.int32)
 
         else:
             selected_class_targets, selected_box_targets, \
@@ -311,9 +305,9 @@ class MRCNN(tf.keras.Model):
         
         mask_outputs = self.mask_head(inputs=mask_roi_features, class_indices=class_indices)
 
-        if MPI_local_rank() == 0:
+        '''if MPI_local_rank() == 0:
             # Print #FLOPs in model.
-            compute_model_statistics(batch_size, is_training=is_training)
+            compute_model_statistics(batch_size, is_training=is_training)'''
 
         if is_training:
             mask_targets = training_ops.get_mask_targets(
@@ -375,7 +369,7 @@ def model_fn(features, labels, params, model, is_training=True):
         if 'features' in features:
             features = features['features']
             # Otherwise, it is in export mode, the features is past in directly.
-    model_outputs = model(features, params, labels, is_training)
+    model_outputs = model(features, labels, params, is_training)
 
     model_outputs.update({
         'source_id': features['source_ids'],
