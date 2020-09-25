@@ -1,3 +1,24 @@
+# Copyright (c) 2017 Elad Hoffer
+# Copyright (c) 2018-2020, NVIDIA CORPORATION. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import logging
 from operator import itemgetter
 
@@ -80,6 +101,37 @@ def build_collate_fn(batch_first=False, parallel=True, sort=False):
     else:
         return single_collate
 
+
+class SyntheticDataset(Dataset):
+    def __init__(self, vocab_size, seq_len, nsamples):
+        self.vocab_size = vocab_size
+        self.nsamples = nsamples
+        self.seq_len = seq_len
+
+    def __getitem__(self, idx):
+        rand = torch.randint(0, self.vocab_size, size=(self.seq_len,))
+        return rand
+
+    def unsort(self, array):
+        return array
+
+    def get_loader(self, batch_size=1, num_workers=0, batch_first=False,
+                   pad=False, repeat=1):
+
+        collate_fn = build_collate_fn(batch_first, parallel=False,
+                                      sort=True)
+        sampler = StaticDistributedSampler(self, batch_size, pad, repeat)
+
+        return DataLoader(self,
+                          batch_size=batch_size,
+                          collate_fn=collate_fn,
+                          sampler=sampler,
+                          num_workers=num_workers,
+                          pin_memory=True,
+                          drop_last=False)
+
+    def __len__(self):
+        return self.nsamples
 
 class RawTextDataset(Dataset):
     def __init__(self, raw_data=None, raw_datafile=None, tokenizer=None,

@@ -1,3 +1,17 @@
+# Copyright (c) 2018-2019, NVIDIA CORPORATION. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch
 import torchvision.transforms as transforms
 import torch.utils.data as data
@@ -243,7 +257,7 @@ class DefaultBoxes(object):
                     cx, cy = (j+0.5)/fk[idx], (i+0.5)/fk[idx]
                     self.default_boxes.append((cx, cy, w, h))
 
-        self.dboxes = torch.tensor(self.default_boxes)
+        self.dboxes = torch.tensor(self.default_boxes, dtype=torch.float)
         self.dboxes.clamp_(min=0, max=1)
         # For IoU calculation
         self.dboxes_ltrb = self.dboxes.clone()

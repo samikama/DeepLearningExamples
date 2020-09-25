@@ -1,110 +1,116 @@
-Faster Transformer
-===================
-## What is it?
-The Faster Transformer implements an equivalent but highly optimized BERT transformer layer for inference. On Volta and Turing GPUs, FP16 precision is used automatically to access the computing power of tensor cores.
+# FasterTransformer
 
-Faster Transformer is built on top of the CUDA and cuBLAS. It supports three kinds of sequence lengths, 32, 64 and 128. Two key parameters of the transformer layer, the number of heads and the size of each head, are passed in runtime. Thus, not only the BERT Base (12 heads *  64 per head) , but also customized models like 4 heads * 32 per head and 8 heads * 96 per heads, are well supported. Our implementation shows good speedups on both small and large batch size cases. 
+This repository provides a script and recipe to run the highly optimized transformer for inference, and it is tested and maintained by NVIDIA.
 
-C++ API, TensorRT plugin, and TensorFlow OP wrapper are available. You can easily integrate this optimized transformer layer into your TensorFlow or other inference service codes that built in native C++ or TensorRT. In addition to codes that illustrate the API invocations, we also provide a simple end-to-end BERT TensorFlow inference sample.
+## Table Of Contents
+- [FasterTransformer](#fastertransformer)
+  - [Table Of Contents](#table-of-contents)
+  - [Model overview](#model-overview)
+    - [FasterTransformer v1](#fastertransformer-v1)
+    - [FasterTransformer v2](#fastertransformer-v2)
+    - [FasterTransformer v2.1](#fastertransformer-v21)
+    - [FasterTransformer v3.0](#fastertransformer-v30)
+    - [Architecture matrix](#architecture-matrix)
+  - [Release notes](#release-notes)
+    - [Changelog](#changelog)
+  - [Known issues](#known-issues)
 
-## Environment requirements
-* CMake >= 3.8
-* CUDA 10.0
-* Python 2.7
-* Tensorflow 1.13
-* TensorRT 5.1.5
-* The project is tested in nvidia/cuda 10.0-cudnn7-devel-ubuntu16.04 docker image. If you encountered compiling errors, try to compile with this docker image.
+## Model overview
 
-## Performance ##
-* CPU: Intel(R) Xeon(R) Gold 6132 CPU @ 2.60GHz
-* T4 (with mclk 5000MHz, pclk 1590MHz)  
-* P4 (with mclk 2999MHz, pclk 1531MHz)  
-* V100 (with mclk 877MHz, pclk 1380MHz)  
+### FasterTransformer v1
 
-When batch size equals to 1, the Tensorflow execution time really depends on the CPU you are using. 
+FasterTransformer v1 provides a highly optimized BERT equivalent Transformer layer for inference, including C++ API, TensorFlow op and TensorRT plugin. The experiments show that FasterTransformer v1 can provide 1.3 ~ 2 times speedup on NVIDIA Tesla T4 and NVIDIA Tesla V100 for inference. 
 
-We only report the faster transformer performance here. 
+### FasterTransformer v2
 
-The performance of the faster transformer mainly depends on GPU. The execution time is stable.
+FastTransformer v2 adds a highly optimized OpenNMT-tf based decoder and decoding for inference in FasterTransformer v1, including C++ API and TensorFlow op. The experiments show that FasterTransformer v2 can provide 1.5 ~ 11 times speedup on NVIDIA Telsa T4 and NVIDIA Tesla V 100 for inference.
 
+### FasterTransformer v2.1
 
-| <batch_size, layers, seq_len, head_num, size_per_head> | P4 FP32 (in ms) | T4 FP32 (in ms)| T4 FP16 (in ms)|
-|:-------------:|:-------------:|:---------:|:-----------:|
-| (1, 12, 32, 12, 64)  | 3.43  | 2.74 | 1.56 |
-| (1, 12, 64, 12, 64)  | 4.04 | 3.64 | 1.77 | 
-| (1, 12, 128, 12, 64) | 6.22 | 5.93 | 2.23 |
+FasterTransformer v2.1 optimizes some kernels of encoder and decoder, adding the support of PyTorch, the support of remove the padding of encoder and the support of sampling algorithm in decoding. 
 
+### FasterTransformer v3.0 
 
-For large batch size case, we report both Tensorflow XLA and faster transformer's performance.
+FasterTransformer v3.0 adds the supporting of INT8 quantization for cpp and TensorFlow encoder model on Turing and Ampere GPUs. 
 
-| <batch_size, layers, seq_len, head_num, size_per_head> | Tensorflow XLA on V100 FP16 (in ms)| Faster Transformer V100 FP16 (in ms) | Speedup |
-|:-------------:|:-------------:|:---------:|:-----------:|
-| (100, 12, 32, 12, 64)  | 13.96  | 9.57 | 1.459 |
-| (200, 12, 32, 12, 64)  | 26.47  | 18.37 | 1.44 |
-| (300, 12, 32, 12, 64)  | 38.4  | 27.41 | 1.401 |
-| (400, 12, 32, 12, 64)  | 49.65  | 35.63 | 1.393 |
-| (500, 12, 32, 12, 64)  | 62.2  | 44.57 | 1.396 |
+### Architecture matrix
 
-| <batch_size, layers, seq_len, head_num, size_per_head> | Tensorflow XLA on V100 FP16 (in ms)| Faster Transformer V100 FP16 (in ms) | Speedup |
-|:-------------:|:-------------:|:---------:|:-----------:|
-| (100, 12, 32, 4, 32)  | 3.49  | 1.73 | 2.017 |
-| (200, 12, 32, 4, 32)  | 4.9  | 2.55 | 1.922 |
-| (300, 12, 32, 4, 32)  | 6.35  | 3.356 | 1.892 |
-| (400, 12, 32, 4, 32)  | 8  | 4.31 | 1.856 |
-| (500, 12, 32, 4, 32)  | 9.93  | 5.13 | 1.936 |
+The following matrix shows the Architecture Differences between the model.
 
-## Directory Structure
-```
-/fastertransformer: source code of transformer
-   |--/cuda: some CUDA kernels and multi-head attention implementation, both are compiled with cuda/cuBLAS. 
-   |--/tf_op: custom Tensorflow OP implementation
-   |--/trt_plugin: TensorRT plugin implementation
-/sample: c++ and tensorflow transformer interface samples
-   |--/cpp: both FP16 and FP32 c++ interface samples
-   |--/fastertransformer_bert: samples that show of how to integrate our Tensorflow OP into the open source BERT model for sentence (and sentence-pair) classification tasks (GLUE), the samples support both FP16 and FP32, see readme file within this folder more details
-   |--/tensorflow: both FP16 and FP32 tensorflow OP samples
-   |--/tensorRT: both FP16 and FP32 tensorRT plugin samples
-/tools/gemm_test: loop over all GEMM algorithms to pick the best one
-```
+| Architecure               | Encoder           | Encoder INT8 quantization  |Decoder             | Decoding with beam search | Decoding with sampling |
+|---------------------------|-------------------|----------------------------|--------------------|---------------------------|------------------------|
+|FasterTransformer v1    |  Yes | No  | No  | No  | No  |
+|FasterTransformer v2    |  Yes | No  | Yes | Yes | No  |
+|FasterTransformer v2.1  |  Yes | No  | Yes | Yes | Yes |
+|FasterTransformer v3.0  |  Yes | Yes | Yes | Yes | Yes |
 
-## How to build?
-### Init Git ###
-```shell
-$ git submodule init
-$ git submodule update
-```
+## Release notes
 
-### Build with Release ###
-```shell
-$ mkdir -p build
-$ cd build
-$ cmake -DSM=xx -DCMAKE_BUILD_TYPE=Release .. # C++ only
-$ cmake -DSM=xx -DCMAKE_BUILD_TYPE=Release -DBUILD_TRT=ON -DTRT_PATH=/myspace/TensorRT-5.1.5.0 .. # TensorRT mode
-$ cmake -DSM=xx -DCMAKE_BUILD_TYPE=Release -DBUILD_TF=ON -DTF_PATH=/usr/local/lib/python2.7/dist-packages/tensorflow .. # Tensorflow mode
-$ cmake -DSM=xx -DCMAKE_BUILD_TYPE=Release -DBUILD_TRT=ON -DTRT_PATH=/myspace/TensorRT-5.1.5.0 -DBUILD_TF=ON -DTF_PATH=/usr/local/lib/python2.7/dist-packages/tensorflow .. # C++, TensorRT and Tensorflow 
-$ make
-```
+FasterTransformer v1 was deprecated on July 2020. 
 
-Note: xx is the compute capability of your GPU. For example, 60 (P40) or 61 (P4) or 70 (V100) or 75(T4).
-### Execute demos ###
-```shell
-$ Step1 Generate the gemm_config.in file under the path build to pick GEMM algorithms for the best performance.
-$ ./build/bin/gemm_fp16(32) <batch_size> <seq_len> <head_num> <size_per_head>
-$ Step2 Execute demos
-$ 1. Tensorflow demos: python build/transformer_fp16(32).py <batch_size> <num_layers> <seq_len> <head_num> <size_per_head>
-$ 2. c++ demos: ./build/bin/transformer_fp16(32) <batch_size> <num_layerse> <seq_len> <head_num> <size_per_head>
-$ 3. TensorRT demos: ./build/bin/transformer_trt <batch_size> <num_layerse> <seq_len> <head_num> <size_per_head> fp16(fp32)
-```
+FasterTransformer v2 will be deprecated on Dec 2020. 
 
-### Useful sample code ###
-```shell
-$ 1. sample/tensorflow/transformer_fp32.py: transformer_layer Tensorflow FP32 OP call, time measurement, timeline generation
-$ 2. sample/tensorflow/transformer_fp16.py: transformer_layer Tensorflow FP16 OP call, time measurement, timeline generation
-$ 3. sample/tensorflow/error_check.py: how to catch custom OP runtime errors
-$ 4. sample/cpp/transformer_fp32.cc: transformer layer C++ FP32 sample
-$ 5. sample/cpp/transformer_fp16.cc: transformer layer C++ FP16 sample
-$ 6. sample/tensorRT/transformer_trt.cc: transformer layer tensorRT FP32/FP16 sample
-$ 7. tools/gemm_test/gemm_fp16.cu: loop over all cublas FP16 GEMM algorithms and pick the best one
-$ 8. tools/gemm_test/gemm_fp32.cu: loop over all cublas FP32 GEMM algorithms and pick the best one
-```
+FasterTransformer v2.1 will be deprecated on July 2021. 
 
+### Changelog
+
+Sep 2020
+- **Release the FasterTransformer 3.0**
+  - Support INT8 quantization of encoder of cpp and TensorFlow op.
+  - Add bert-tf-quantization tool.
+  - Fix the issue that Cmake 15 or Cmake 16 fail to build this project.
+
+Aug 2020
+- Fix the bug of trt plugin.
+
+June 2020
+- **Release the FasterTransformer 2.1**
+- Add [effective transformer](https://github.com/bytedance/effective_transformer) supporting into encoder.
+- Optimize the beam search kernels.
+- Add PyTorch op supporting
+
+May 2020
+- Fix the bug that seq_len of encoder must be larger than 3.
+- Add the position_encoding of decoding as the input of FasterTransformer decoding. This is convenient to use different types of position encoding. FasterTransformer does not compute the position encoding value, but only lookup the table. 
+- Modifying the method of loading model in `translate_sample.py`.
+
+April 2020
+- Rename `decoding_opennmt.h` to `decoding_beamsearch.h`
+- Add DiverseSiblingsSearch for decoding.
+- Add sampling into Decoding
+  - The implementation is in the `decoding_sampling.h`
+  - Add top_k sampling, top_p sampling for decoding.
+- Refactor the tensorflow custom op codes.
+  - Merge `bert_transformer_op.h`, `bert_transformer_op.cu.cc` into `bert_transformer_op.cc`
+  - Merge `decoder.h`, `decoder.cu.cc` into `decoder.cc`
+  - Merge `decoding_beamsearch.h`, `decoding_beamsearch.cu.cc` into `decoding_beamsearch.cc`
+- Fix the bugs of finalize function decoding.py. 
+- Fix the bug of tf DiverseSiblingSearch.
+- Add BLEU scorer `bleu_score.py` into `utils`. Note that the BLEU score requires python3. 
+- Fuse QKV Gemm of encoder and masked_multi_head_attention of decoder.
+- Add dynamic batch size and dynamic sequence length features into all ops.
+
+March 2020
+- Add feature in FasterTransformer 2.0
+  - Fix the bug of maximum sequence length of decoder cannot be larger than 128.
+  - Add `translate_sample.py` to demonstrate how to translate a sentence by restoring the pretrained model of OpenNMT-tf.
+  - Fix the bug that decoding does not check finish or not after each step. 
+  - Fix the bug of decoder about max_seq_len.
+  - Modify the decoding model structure to fit the OpenNMT-tf decoding model. 
+    - Add a layer normalization layer after decoder.
+    - Add a normalization for inputs of decoder
+    
+February 2020
+- **Release the FasterTransformer 2.0**
+  - Provide a highly optimized OpenNMT-tf based decoder and decoding, including C++ API and TensorFlow OP.
+  - Refine the sample codes of encoder.
+  - Add dynamic batch size feature into encoder op.
+
+July 2019
+- **Release the FasterTransformer 1.0**
+  - Provide a highly optimized bert equivalent transformer layer, including C++ API, TensorFlow OP and TensorRT plugin.
+ 
+
+## Known issues
+
+There are no known issues with this model.

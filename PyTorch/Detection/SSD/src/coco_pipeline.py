@@ -1,4 +1,4 @@
-# Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2018-2019, NVIDIA CORPORATION. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ class COCOPipeline(Pipeline):
         self.input = ops.COCOReader(file_root = file_root, annotations_file = annotations_file,
                             shard_id = shard_id, num_shards = num_gpus, ratio=True, ltrb=True, random_shuffle=True,
                                     skip_empty=True)
-        self.decode = ops.HostDecoder(device = "cpu", output_type = types.RGB)
+        self.decode = ops.ImageDecoder(device = "cpu", output_type = types.RGB)
 
         # Augumentation techniques
         self.crop = ops.SSDRandomCrop(device="cpu", num_attempts=1)
@@ -163,7 +163,7 @@ class DALICOCOIterator(object):
         for p in self._pipes:
             p._prefetch()
         for p in self._pipes:
-            outputs.append(p._share_outputs())
+            outputs.append(p.share_outputs())
         for i in range(self._num_gpus):
             dev_id = self._pipes[i].device_id
             out_images = []
@@ -187,7 +187,7 @@ class DALICOCOIterator(object):
             for j in range(len(bboxes)):
                 bboxes_shape.append([])
                 for k in range(len(bboxes[j])):
-                    bboxes_shape[j].append(bboxes[j].at(k).shape())
+                    bboxes_shape[j].append(bboxes[j][k].shape())
 
             # Prepare labels shapes and offsets
             labels_shape = []
@@ -198,14 +198,14 @@ class DALICOCOIterator(object):
                 labels_shape.append([])
                 bbox_offsets.append([0])
                 for k in range(len(labels[j])):
-                    lshape = labels[j].at(k).shape()
+                    lshape = labels[j][k].shape()
                     bbox_offsets[j].append(bbox_offsets[j][k] + lshape[0])
                     labels_shape[j].append(lshape)
 
             # We always need to alocate new memory as bboxes and labels varies in shape
             images_torch_type = to_torch_type[np.dtype(images[0].dtype())]
-            bboxes_torch_type = to_torch_type[np.dtype(bboxes[0].at(0).dtype())]
-            labels_torch_type = to_torch_type[np.dtype(labels[0].at(0).dtype())]
+            bboxes_torch_type = to_torch_type[np.dtype(bboxes[0][0].dtype())]
+            labels_torch_type = to_torch_type[np.dtype(labels[0][0].dtype())]
 
             torch_gpu_device = torch.device('cuda', dev_id)
             torch_cpu_device = torch.device('cpu')
@@ -224,21 +224,21 @@ class DALICOCOIterator(object):
             for j, b_list in enumerate(bboxes):
                 for k in range(len(b_list)):
                     if (pyt_bboxes[j][k].shape[0] != 0):
-                        feed_ndarray(b_list.at(k), pyt_bboxes[j][k])
+                        feed_ndarray(b_list[k], pyt_bboxes[j][k])
                 pyt_bboxes[j] = torch.cat(pyt_bboxes[j])
 
             for j, l_list in enumerate(labels):
                 for k in range(len(l_list)):
                     if (pyt_labels[j][k].shape[0] != 0):
-                        feed_ndarray(l_list.at(k), pyt_labels[j][k])
+                        feed_ndarray(l_list[k], pyt_labels[j][k])
                 pyt_labels[j] = torch.cat(pyt_labels[j]).squeeze(dim=1)
 
             for j in range(len(pyt_offsets)):
                 pyt_offsets[j] = torch.IntTensor(bbox_offsets[j])
 
         for p in self._pipes:
-            p._release_outputs()
-            p._run()
+            p.release_outputs()
+            p.schedule_run()
 
         copy_db_index = self._current_data_batch
         # Change index for double buffering

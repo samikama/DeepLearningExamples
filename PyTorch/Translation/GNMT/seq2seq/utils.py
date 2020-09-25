@@ -1,3 +1,24 @@
+# Copyright (c) 2017 Elad Hoffer
+# Copyright (c) 2018-2020, NVIDIA CORPORATION. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import logging.config
 import os
 import random
@@ -5,6 +26,7 @@ import sys
 import time
 from contextlib import contextmanager
 
+import dllogger
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -199,6 +221,21 @@ def setup_logging(log_all_ranks=True, log_file=os.devnull):
     logging.getLogger('').addFilter(rank_filter)
 
 
+def setup_dllogger(enabled=True, filename=os.devnull):
+    rank = get_rank()
+
+    if enabled and rank == 0:
+        backends = [
+            dllogger.JSONStreamBackend(
+                dllogger.Verbosity.VERBOSE,
+                filename,
+                ),
+            ]
+        dllogger.init(backends)
+    else:
+        dllogger.init([])
+
+
 def set_device(cuda, local_rank):
     """
     Sets device based on local_rank and returns instance of torch.device.
@@ -241,7 +278,7 @@ def log_env_info():
 
 
 def pad_vocabulary(math):
-    if math == 'fp16' or math == 'manual_fp16':
+    if math == 'tf32' or math == 'fp16' or math == 'manual_fp16':
         pad_vocab = 8
     elif math == 'fp32':
         pad_vocab = 1

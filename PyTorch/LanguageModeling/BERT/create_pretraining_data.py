@@ -1,6 +1,6 @@
 # coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors.
-#
+# Copyright (c) 2019 NVIDIA CORPORATION. All rights reserved.
+# Copyright 2018 The Google AI Language Team Authors and The HugginFace Inc. team.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """Create masked LM/next sentence masked_lm TF examples for BERT."""
 from __future__ import absolute_import, division, print_function, unicode_literals
 
@@ -248,6 +249,10 @@ def create_instances_from_document(
             if random_document_index != document_index:
               break
 
+          #If picked random document is the same as the current document
+          if random_document_index == document_index:
+            is_random_next = False
+
           random_document = all_documents[random_document_index]
           random_start = rng.randint(0, len(random_document) - 1)
           for j in range(random_start, len(random_document)):
@@ -444,8 +449,7 @@ def main():
 
     args = parser.parse_args()
 
-    tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
-
+    tokenizer = BertTokenizer(args.vocab_file, do_lower_case=args.do_lower_case, max_len=512)
     
     input_files = []
     if os.path.isfile(args.input_file):
