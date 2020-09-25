@@ -1,4 +1,7 @@
 import os
+from mpi4py import MPI
+
+os.environ["CUDA_VISIBLE_DEVICES"]=str(MPI.COMM_WORLD.Get_rank())
 import numpy as np
 import sys
 import itertools
@@ -35,7 +38,7 @@ import horovod.tensorflow as hvd
 hvd.init()
 physical_devices = tf.config.list_physical_devices('GPU')
 # tf.config.experimental.set_memory_growth(physical_devices[hvd.rank()], True)
-tf.config.set_visible_devices(physical_devices[hvd.rank()], 'GPU')
+#tf.config.set_visible_devices(physical_devices[hvd.rank()], 'GPU')
 devices = tf.config.list_logical_devices('GPU')
 
 tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
@@ -141,14 +144,16 @@ if os.environ.get("TF_GPU_THREAD_MODE") == 'gpu_private':
 
 def run_loop(progressbar):
     loss_history=[]
+    update_pbar=hvd.rank()==0
     for i in progressbar:
       features,labels=next(train_iter)
       total_loss=train_step(features,labels,params,mask_rcnn,optimizer)
       loss_history.append(total_loss.numpy())
       smoothed_loss = mean(loss_history[-50:])
-      progressbar.set_description(
-          "L: {0:.4f},  LR: {1:.4f}".format(
-              smoothed_loss,  schedule(optimizer.iterations)))
+      if update_pbar:
+        progressbar.set_description(
+            "L: {0:.4f},  LR: {1:.4f}".format(
+                smoothed_loss,  schedule(optimizer.iterations)))
 
 def do_step_profile(profile_path, stepstr, progressbar):
   if do_profile:
