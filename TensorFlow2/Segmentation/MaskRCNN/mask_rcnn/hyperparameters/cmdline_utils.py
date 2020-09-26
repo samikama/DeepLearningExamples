@@ -53,6 +53,12 @@ def define_hparams_flags():
         default=True,
         help='Run one eval after the training finishes.'
     )
+    
+    flags.DEFINE_integer(
+        'first_eval',
+        default=0,
+        help='Number of early epochs to skip eval.'
+    )
 
     flags.DEFINE_integer('eval_samples', default=5000, help='Number of training steps')
 

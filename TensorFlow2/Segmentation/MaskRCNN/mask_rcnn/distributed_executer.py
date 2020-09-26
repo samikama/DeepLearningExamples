@@ -452,7 +452,7 @@ class BaseExecuter(object):
               max_steps=max_cycle_step,
               hooks=training_hooks,
           )
-      MIN_EVAL_EPOCH = 0
+      MIN_EVAL_EPOCH = self._runtime_config.first_eval
       if cycle < MIN_EVAL_EPOCH:
           continue
 

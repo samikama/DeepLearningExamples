@@ -36,6 +36,7 @@ mkdir -p $BASEDIR/../results_32x
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../results_32x" \
         --num_steps_per_eval=462 \
+        --first_eval=10 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1800 \
         --global_gradient_clip_ratio=0.0 \
