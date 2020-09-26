@@ -21,6 +21,7 @@ mkdir -p $BASEDIR/../results_32x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     --hostfile ~/hosts \
+    -N 8 \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
@@ -33,7 +34,7 @@ mkdir -p $BASEDIR/../results_32x
         --learning_rate_steps="5625,7500" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../results_1x" \
+        --model_dir="$BASEDIR/../results_32x" \
         --num_steps_per_eval=462 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1800 \
