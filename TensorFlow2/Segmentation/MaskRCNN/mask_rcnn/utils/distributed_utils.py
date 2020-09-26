@@ -49,20 +49,15 @@ def MPI_local_rank():
 
 
 def MPI_rank():
-    return MPI_rank_and_size()[0]
+    return int(os.environ.get("OMPI_COMM_WORLD_RANK"))
 
 
 def MPI_size():
-    return MPI_rank_and_size()[1]
+    return int(os.environ.get("OMPI_COMM_WORLD_SIZE"))
 
 
 def MPI_rank_and_size():
-
-    if "tensorflow" in sys.modules:
-        return mpi_env_MPI_rank_and_size()
-
-    else:
-        return 0, 1
+    return MPI_rank(), MPI_size()
 
 
 # Source: https://github.com/horovod/horovod/blob/c3626e/test/common.py#L25

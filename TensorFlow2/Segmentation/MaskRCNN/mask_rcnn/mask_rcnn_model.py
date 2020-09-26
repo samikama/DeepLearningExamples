@@ -26,7 +26,7 @@ procedure.
 import itertools
 
 import tensorflow as tf
-
+import tensorflow_addons as tfa
 from mask_rcnn import anchors
 
 from mask_rcnn.models import fpn
@@ -49,6 +49,7 @@ from mask_rcnn.utils.meters import StandardMeter
 from mask_rcnn.utils.metric_tracking import register_metric
 
 from mask_rcnn.utils.lazy_imports import LazyImport
+from mask_rcnn.training.optimization import LambOptimizer, NovoGrad
 hvd = LazyImport("horovod.tensorflow")
 
 MODELS = dict()
@@ -80,6 +81,86 @@ def create_optimizer(learning_rate, params):
 
     return optimizer
 
+def create_lamb_optimizer(learning_rate, params):
+    """Creates optimized based on the specified flags."""
+    optimizer = LAMBOptimizer(
+            learning_rate,
+            beta_1=0.9,
+            beta_2=0.999,
+            weight_decay_rate=params['l2_weight_decay'],
+            exclude_from_weight_decay=['bias', 'beta', 'batch_normalization']
+    )
+
+#    optimizer = tfa.optimizers.LAMB(
+#        learning_rate=4e-3,
+#        weight_decay_rate=1e-4,
+#        beta_1=0.9,
+#        beta_2=0.999,
+#        epsilon=1e-6,
+#        exclude_from_weight_decay=["bias"],
+#    )
+
+    if MPI_is_distributed():
+        optimizer = hvd.DistributedOptimizer(
+            optimizer,
+            name=None,
+            device_dense='/gpu:0',
+            device_sparse='',
+            # compression=hvd.Compression.fp16,
+            compression=hvd.Compression.none,
+            sparse_as_dense=False
+        )
+
+    if params["amp"]:
+        loss_scale = tf.train.experimental.DynamicLossScale(
+            initial_loss_scale=(2 ** 11),
+            increment_period=2000,
+            multiplier=2.0
+        )
+        optimizer = tf.compat.v1.train.experimental.MixedPrecisionLossScaleOptimizer(optimizer, loss_scale=loss_scale)
+
+    return optimizer
+
+
+def create_novograd_optimizer(learning_rate, params):
+    """Creates optimized based on the specified flags."""
+    optimizer = NovoGrad(
+            learning_rate,
+            beta_1=0.9,
+            beta_2=0.4, #0.5, #0.8, #0.98,
+            weight_decay=params['l2_weight_decay'],
+            exclude_from_weight_decay=['bias', 'beta', 'batch_normalization']
+    )
+
+
+#    optimizer = tfa.optimizers.NovoGrad(
+#        lr=1e-3,
+#        beta_1=0.9,
+#        beta_2=0.999,
+#        weight_decay=0.001,
+#        grad_averaging=False
+#    )
+
+    if MPI_is_distributed():
+        optimizer = hvd.DistributedOptimizer(
+            optimizer,
+            name=None,
+            device_dense='/gpu:0',
+            device_sparse='',
+            # compression=hvd.Compression.fp16,
+            compression=hvd.Compression.none,
+            sparse_as_dense=False
+        )
+
+    if params["amp"]:
+        loss_scale = tf.train.experimental.DynamicLossScale(
+            initial_loss_scale=(2 ** 11),
+            increment_period=2000,
+            multiplier=2.0
+        )
+        optimizer = tf.compat.v1.train.experimental.MixedPrecisionLossScaleOptimizer(optimizer, loss_scale=loss_scale)
+
+    return optimizer
 
 def compute_model_statistics(batch_size, is_training=True):
     """Compute number of parameters and FLOPS."""
@@ -115,7 +196,8 @@ def build_model_graph(features, labels, is_training, params):
         "resnet50",
         data_format='channels_last',
         trainable=is_training,
-        finetune_bn=params['finetune_bn']
+        finetune_bn=params['finetune_bn'],
+        norm_type='batchnorm'
     )
 
     backbone_feats = MODELS["backbone"](
@@ -431,11 +513,14 @@ def _model_fn(features, labels, mode, params):
 
     trainable_variables = list(itertools.chain.from_iterable([model.trainable_variables for model in MODELS.values()]))
 
-    l2_regularization_loss = params['l2_weight_decay'] * tf.add_n([
-        tf.nn.l2_loss(v)
-        for v in trainable_variables
-        if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
-    ])
+    if params['optimizer_type'] in ['LAMB', 'Novograd']: # decoupled weight decay
+        l2_regularization_loss = tf.constant(0.0)
+    else:
+        l2_regularization_loss = params['l2_weight_decay'] * tf.add_n([
+            tf.nn.l2_loss(v)
+            for v in trainable_variables
+            if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
+        ])
 
     total_loss = total_rpn_loss + total_fast_rcnn_loss + mask_loss + l2_regularization_loss
 
@@ -453,20 +538,47 @@ def _model_fn(features, labels, mode, params):
 
     if mode == tf.estimator.ModeKeys.TRAIN:
 
-        learning_rate = learning_rates.step_learning_rate_with_linear_warmup(
-            global_step=global_step,
-            init_learning_rate=params['init_learning_rate'],
-            warmup_learning_rate=params['warmup_learning_rate'],
-            warmup_steps=params['warmup_steps'],
-            learning_rate_levels=params['learning_rate_levels'],
-            learning_rate_steps=params['learning_rate_steps']
-        )
+        if params['lr_schedule'] == 'piecewise':
+            learning_rate = learning_rates.step_learning_rate_with_linear_warmup(
+                global_step=global_step,
+                init_learning_rate=params['init_learning_rate'],
+                warmup_learning_rate=params['warmup_learning_rate'],
+                warmup_steps=params['warmup_steps'],
+                learning_rate_levels=params['learning_rate_levels'],
+                learning_rate_steps=params['learning_rate_steps']
+            )
+        elif params['lr_schedule'] == 'cosine':
+            learning_rate = learning_rates.cosine_learning_rate_with_linear_warmup(
+                global_step=global_step,
+                init_learning_rate=params['init_learning_rate'],
+                warmup_learning_rate=params['warmup_learning_rate'],
+                warmup_steps=params['warmup_steps'],
+                first_decay_steps=params['total_steps'],
+                alpha= 0.001 #* params['init_learning_rate']
+            )
+        else:
+            raise NotImplementedError
 
-        optimizer = create_optimizer(learning_rate, params)
+        if params['optimizer_type'] == 'SGD':
+            optimizer = create_optimizer(learning_rate, params)
+        elif params['optimizer_type'] == 'LAMB':
+            optimizer = create_lamb_optimizer(learning_rate, params)
+        elif params['optimizer_type'] == 'Novograd':
+            optimizer = create_novograd_optimizer(learning_rate, params)
+        else:
+            raise NotImplementedError
 
         grads_and_vars = optimizer.compute_gradients(total_loss, trainable_variables, colocate_gradients_with_ops=True)
 
         gradients, variables = zip(*grads_and_vars)
+        
+        global_gradient_clip_ratio = params['global_gradient_clip_ratio']
+        if global_gradient_clip_ratio > 0.0:
+            all_are_finite = tf.reduce_all([tf.reduce_all(tf.math.is_finite(g)) for g in gradients])
+            (clipped_grads, _) = tf.clip_by_global_norm(gradients, clip_norm=global_gradient_clip_ratio,
+                                use_norm=tf.cond(all_are_finite, lambda: tf.linalg.global_norm(gradients), lambda: tf.constant(1.0)))
+            gradients = clipped_grads
+        
         grads_and_vars = []
 
         # Special treatment for biases (beta is named as bias in reference model)

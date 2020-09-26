@@ -34,6 +34,26 @@ if LooseVersion(tf.__version__) < LooseVersion("2.0.0"):
 else:
     ReductionV2 = tf.keras.losses.Reduction
 
+def _l1_loss(y_true, y_pred, weights, delta=0.0):
+    l1_loss = tf.compat.v1.losses.absolute_difference(y_true, y_pred, weights=weights)
+    assert l1_loss.dtype == tf.float32
+    DEBUG_LOSS_IMPLEMENTATION = False
+    if DEBUG_LOSS_IMPLEMENTATION:
+        mlperf_loss = tf.compat.v1.losses.huber_loss(
+            y_true,
+            y_pred,
+            weights=weights,
+            delta=delta,
+            reduction=tf.compat.v1.losses.Reduction.SUM_BY_NONZERO_WEIGHTS
+        )
+
+        print_op = tf.print("Huber Loss - MLPerf:", mlperf_loss, " && Legacy Loss:", l1_loss)
+
+        with tf.control_dependencies([print_op]):
+            l1_loss = tf.identity(l1_loss)
+
+    return l1_loss
+
 
 def _huber_loss(y_true, y_pred, weights, delta):
 
@@ -130,21 +150,31 @@ def _sigmoid_cross_entropy(multi_class_labels, logits, weights, sum_by_non_zeros
     return sigmoid_cross_entropy
 
 
-def _softmax_cross_entropy(onehot_labels, logits):
+def _softmax_cross_entropy(onehot_labels, logits, label_smoothing=0.0):
 
     num_non_zeros = tf.math.count_nonzero(onehot_labels, dtype=tf.float32)
-
-    softmax_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
-        labels=onehot_labels,
-        logits=logits
-    )
+    if label_smoothing == 0.0:
+        softmax_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
+            labels=onehot_labels,
+            logits=logits
+        )
+    else:
+        softmax_cross_entropy = tf.compat.v1.losses.softmax_cross_entropy(
+            onehot_labels,
+            logits,
+            label_smoothing=label_smoothing,
+            reduction=tf.compat.v1.losses.Reduction.SUM_BY_NONZERO_WEIGHTS
+        )
 
     assert softmax_cross_entropy.dtype == tf.float32
 
-    softmax_cross_entropy = tf.math.reduce_sum(softmax_cross_entropy)
-    softmax_cross_entropy = tf.math.divide_no_nan(softmax_cross_entropy, num_non_zeros, name="softmax_cross_entropy")
+    if label_smoothing == 0.0:
+        softmax_cross_entropy = tf.math.reduce_sum(softmax_cross_entropy)
+        softmax_cross_entropy = tf.math.divide_no_nan(softmax_cross_entropy, num_non_zeros, name="softmax_cross_entropy")
 
     assert softmax_cross_entropy.dtype == tf.float32
+
+    DEBUG_LOSS_IMPLEMENTATION = False
 
     if DEBUG_LOSS_IMPLEMENTATION:
 
@@ -213,7 +243,8 @@ def _rpn_box_loss(box_outputs, box_targets, normalizer=1.0, delta=1. / 9):
         # The loss is normalized by the sum of non-zero weights before additional
         # normalizer provided by the function caller.
         box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
-
+        # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
+        
         assert box_loss.dtype == tf.float32
 
         if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
@@ -304,7 +335,8 @@ def _fast_rcnn_box_loss(box_outputs, box_targets, class_targets, normalizer=1.0,
         # The loss is normalized by the sum of non-zero weights before additional
         # normalizer provided by the function caller.
         box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
-
+        # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
+        
         if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
             box_loss /= normalizer
 

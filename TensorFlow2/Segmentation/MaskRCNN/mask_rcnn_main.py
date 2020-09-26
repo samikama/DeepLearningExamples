@@ -82,6 +82,8 @@ def main(argv):
     RUN_CONFIG = mask_rcnn_params.default_config()
 
     temp_config = FLAGS.flag_values_dict()
+    for i,j in temp_config.items():
+        print("{}: {}".format(i,j))
     temp_config['learning_rate_decay_levels'] = [float(decay) for decay in temp_config['learning_rate_decay_levels']]
     temp_config['learning_rate_levels'] = [
         decay * temp_config['init_learning_rate'] for decay in temp_config['learning_rate_decay_levels']

@@ -24,9 +24,8 @@ from __future__ import print_function
 import abc
 import os
 import six
-
+from mpi4py import MPI
 import math
-
 import multiprocessing
 
 import tensorflow as tf
@@ -35,7 +34,7 @@ from mask_rcnn.utils.logging_formatter import logging
 
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 from mask_rcnn.utils.distributed_utils import MPI_local_rank
-from mask_rcnn.utils.distributed_utils import MPI_rank
+from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_size
 
 from mask_rcnn.hooks.logging_hook import AutoLoggingHook
 
@@ -50,16 +49,19 @@ from mask_rcnn.hooks import CheckpointSaverHook
 from mask_rcnn.hooks import PretrainedWeightsLoadingHook
 
 
-def get_training_hooks(mode, model_dir, checkpoint_path=None, skip_checkpoint_variables=None):
+def get_training_hooks(mode, runtime_config): # model_dir, checkpoint_path=None, skip_checkpoint_variables=None):
 
     assert mode in ('train', 'eval')
+    model_dir=runtime_config.model_dir
+    checkpoint_path=runtime_config.checkpoint
+    skip_checkpoint_variables=runtime_config.skip_checkpoint_variables
 
     training_hooks = [
         AutoLoggingHook(
-            # log_every_n_steps=RUNNING_CONFIG.display_step,
-            log_every_n_steps=5 if "NGC_JOB_ID" not in os.environ else 100,
-            # warmup_steps=RUNNING_CONFIG.warmup_steps,
-            warmup_steps=100,
+            log_every_n_steps=5,
+            #log_every_n_steps=5 if "NGC_JOB_ID" not in os.environ else 100,
+            warmup_steps=runtime_config.warmup_steps,
+            #warmup_steps=100,
             is_training=True
         )
     ]
@@ -297,9 +299,7 @@ class BaseExecuter(object):
         max_steps=self._runtime_config.total_steps,
         hooks=get_training_hooks(
             mode="train",
-            model_dir=self._runtime_config.model_dir,
-            checkpoint_path=self._runtime_config.checkpoint,
-            skip_checkpoint_variables=self._runtime_config.skip_checkpoint_variables
+            runtime_config=self._runtime_config,
         )
     )
 
@@ -309,30 +309,91 @@ class BaseExecuter(object):
     if eval_input_fn is None:
       raise ValueError('Eval input_fn must be passed to conduct evaluation after training.')
 
-    eval_run_config = self.build_strategy_configuration('eval')
-    eval_params = self.build_model_parameters('eval')
-    eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
+    if self._runtime_config.dist_eval and MPI_is_distributed():
+        MPI.COMM_WORLD.Barrier()  # Waiting for checkpoint to be written (important for dist eval)
+    eval_estimator = None
+    pending_eval_threads = []
+    if not self._runtime_config.dist_eval:
+        if not MPI_is_distributed() or MPI_rank() == 0:
+            if eval_estimator is None:
+                eval_run_config = self.build_strategy_configuration('eval')
+                eval_params = self.build_model_parameters('eval')
+                eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
 
-    last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
-    logging.info("Restoring parameters from %s\n" % last_ckpt)
+            last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
+            logging.info("Restoring parameters from %s\n" % last_ckpt)
+            eval_results, predictions = evaluation.evaluate(
+                eval_estimator,
+                eval_input_fn,
+                self._runtime_config.eval_samples,
+                self._runtime_config.eval_batch_size,
+                self._runtime_config.include_mask,
+                self._runtime_config.val_json_file,
+                report_frequency=self._runtime_config.report_frequency
+            )
+    else:
+        if eval_estimator is None:
+            logging.info("Built eval estimator")
+            eval_run_config = self.build_strategy_configuration('eval')
+            eval_params = self.build_model_parameters('eval')
+            eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
 
-    eval_results, predictions = evaluation.evaluate(
-        eval_estimator,
-        eval_input_fn,
-        self._runtime_config.eval_samples,
-        self._runtime_config.eval_batch_size,
-        self._runtime_config.include_mask,
-        self._runtime_config.val_json_file,
-        report_frequency=self._runtime_config.report_frequency
-    )
+        last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
+        logging.info("Restoring parameters from %s\n" % last_ckpt)
+        num_eval_workers = min(32, MPI_size())
+        async_eval_thread = evaluation.evaluate(
+            eval_estimator,
+            eval_input_fn,
+            self._runtime_config.eval_samples // num_eval_workers, # divide 5000 by num eval workers TODO: run eval for a subset of workers so that eval size divides evenly
+            self._runtime_config.eval_batch_size,
+            self._runtime_config.include_mask,
+            self._runtime_config.val_json_file,
+            report_frequency=self._runtime_config.report_frequency,
+            do_distributed=True,
+            latest_ckpt=last_ckpt
+        )
+        pending_eval_threads.append(async_eval_thread)
 
-    output_dir = os.path.join(self._runtime_config.model_dir, 'eval')
-    tf.io.gfile.makedirs(output_dir)
+    if not MPI_is_distributed(): # or MPI_rank() == 0: TODO: move write summary to thread run in case of dist eval
+        self._write_summary(output_dir, eval_results, predictions, max_cycle_step)
 
-    # Summary writer writes out eval metrics.
-    self._write_summary(output_dir, eval_results, predictions, self._runtime_config.total_steps)
+    if MPI_is_distributed():
+        MPI.COMM_WORLD.Barrier()  # Waiting for all MPI processes to sync
 
-    return eval_results
+    if MPI_is_distributed():
+        # wait for all evaluation results to be logged
+        for t in pending_eval_threads:
+            if t and t.is_alive():
+                t.join()
+        return {}
+    else:
+        return eval_results
+
+
+#    eval_run_config = self.build_strategy_configuration('eval')
+#    eval_params = self.build_model_parameters('eval')
+#    eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
+#
+#    last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
+#    logging.info("Restoring parameters from %s\n" % last_ckpt)
+#
+#    eval_results, predictions = evaluation.evaluate(
+#        eval_estimator,
+#        eval_input_fn,
+#        self._runtime_config.eval_samples,
+#        self._runtime_config.eval_batch_size,
+#        self._runtime_config.include_mask,
+#        self._runtime_config.val_json_file,
+#        report_frequency=self._runtime_config.report_frequency
+#    )
+#
+#    output_dir = os.path.join(self._runtime_config.model_dir, 'eval')
+#    tf.io.gfile.makedirs(output_dir)
+#
+#    # Summary writer writes out eval metrics.
+#    self._write_summary(output_dir, eval_results, predictions, self._runtime_config.total_steps)
+#
+#    return eval_results
 
   def train_and_eval(self, train_input_fn, eval_input_fn):
     """Run distributed train and eval on Mask RCNN model."""
@@ -346,17 +407,17 @@ class BaseExecuter(object):
     train_estimator = self.build_mask_rcnn_estimator(train_params, train_run_config, 'train')
 
     eval_estimator = None
+    local_eval_results = None
     eval_results = None
 
     num_cycles = math.ceil(self._runtime_config.total_steps / self._runtime_config.num_steps_per_eval)
 
     training_hooks = get_training_hooks(
         mode="train",
-        model_dir=self._runtime_config.model_dir,
-        checkpoint_path=self._runtime_config.checkpoint,
-        skip_checkpoint_variables=self._runtime_config.skip_checkpoint_variables
+        runtime_config=self._runtime_config
     )
 
+    pending_eval_threads = []
     for cycle in range(1, num_cycles + 1):
 
       if not MPI_is_distributed() or MPI_rank() == 0:
@@ -378,7 +439,7 @@ class BaseExecuter(object):
           profiler_context_manager = lambda *args, **kwargs: suppress()  # No-Op context manager
 
       with profiler_context_manager(
-              '/workspace/profiling/',
+              '/shared/profiling/',
               trace_steps=range(100, 200, 3),
               dump_steps=[200]
       ) as pctx:
@@ -392,39 +453,76 @@ class BaseExecuter(object):
               max_steps=max_cycle_step,
               hooks=training_hooks,
           )
+      MIN_EVAL_EPOCH = 10
+      if cycle < MIN_EVAL_EPOCH:
+          continue
 
       if not MPI_is_distributed() or MPI_rank() == 0:
-
           print()  # Visual Spacing
           logging.info("=================================")
           logging.info('    Start evaluation cycle %02d' % cycle)
           logging.info("=================================\n")
 
+
+      if self._runtime_config.dist_eval and MPI_is_distributed():
+          MPI.COMM_WORLD.Barrier()  # Waiting for checkpoint to be written (important for dist eval)
+
+      if not self._runtime_config.dist_eval:
+          if not MPI_is_distributed() or MPI_rank() == 0:
+              if eval_estimator is None:
+                  eval_run_config = self.build_strategy_configuration('eval')
+                  eval_params = self.build_model_parameters('eval')
+                  eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
+
+              last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
+              logging.info("Restoring parameters from %s\n" % last_ckpt)
+              eval_results, predictions = evaluation.evaluate(
+                  eval_estimator,
+                  eval_input_fn,
+                  self._runtime_config.eval_samples,
+                  self._runtime_config.eval_batch_size,
+                  self._runtime_config.include_mask,
+                  self._runtime_config.val_json_file,
+                  report_frequency=self._runtime_config.report_frequency
+              )
+      else:
           if eval_estimator is None:
+              logging.info("Built eval estimator")
               eval_run_config = self.build_strategy_configuration('eval')
               eval_params = self.build_model_parameters('eval')
               eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
 
           last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
           logging.info("Restoring parameters from %s\n" % last_ckpt)
-
-          eval_results, predictions = evaluation.evaluate(
+          num_eval_workers = min(32, MPI_size())
+          async_eval_thread = evaluation.evaluate(
               eval_estimator,
               eval_input_fn,
-              self._runtime_config.eval_samples,
+              self._runtime_config.eval_samples // num_eval_workers, # divide 5000 by num eval workers TODO: run eval for a subset of workers so that eval size divides evenly
               self._runtime_config.eval_batch_size,
               self._runtime_config.include_mask,
               self._runtime_config.val_json_file,
-              report_frequency=self._runtime_config.report_frequency
+              report_frequency=self._runtime_config.report_frequency,
+              do_distributed=True,
+              latest_ckpt=last_ckpt
           )
+          pending_eval_threads.append(async_eval_thread)
 
+      if not MPI_is_distributed(): # or MPI_rank() == 0: TODO: move write summary to thread run in case of dist eval
           self._write_summary(output_dir, eval_results, predictions, max_cycle_step)
 
       if MPI_is_distributed():
-          from mpi4py import MPI
           MPI.COMM_WORLD.Barrier()  # Waiting for all MPI processes to sync
 
-    return eval_results
+    if MPI_is_distributed():
+        # wait for all evaluation results to be logged
+        for t in pending_eval_threads:
+            if t and t.is_alive():
+                t.join()
+        return {}
+    else:
+        return eval_results
+
 
   def eval(self, eval_input_fn):
     """Run distributed eval on Mask RCNN model."""
@@ -500,7 +598,7 @@ class EstimatorExecuter(BaseExecuter):
         ),
         model_dir=self._runtime_config.model_dir,
         save_summary_steps=None,  # disabled
-        save_checkpoints_steps=None,  # disabled
+        save_checkpoints_steps=None, # disabled
         save_checkpoints_secs=None,  # disabled
         keep_checkpoint_max=20,  # disabled
         keep_checkpoint_every_n_hours=None,  # disabled

@@ -397,7 +397,7 @@ def custom_multilevel_propose_rois(scores_outputs, box_outputs, all_anchors, ima
             #   dtype=scores_outputs[level].dtype)
             logging.debug("[ROI OPs] Using GenerateBoxProposals op... Scope: proposal_%s" % level)
 
-            boxes_per_level, scores_per_level = tf.generate_bounding_box_proposals(
+            boxes_per_level, scores_per_level = tf.image.generate_bounding_box_proposals(
                 scores=tf.reshape(tf.sigmoid(scores_outputs[level]),
                                   scores_outputs[level].shape),
                 bbox_deltas=box_outputs[level],

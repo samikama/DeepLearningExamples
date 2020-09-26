@@ -94,7 +94,8 @@ def default_config():
         # skipping nonexistent variables from the constructed graph. The list
         # of loaded variables is constructed from the scope 'resnetX', where 'X'
         # is depth of the resnet model. Supports regular expression.
-        skip_checkpoint_variables='^NO_SKIP$',
+        # skip_checkpoint_variables='^NO_SKIP$',
+        skip_checkpoint_variables='^.*(group_norm)',
 
         # ---------- Eval configurations ----------
         # Visualizes images and detection boxes on TensorBoard.

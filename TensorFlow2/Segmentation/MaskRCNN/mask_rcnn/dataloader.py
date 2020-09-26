@@ -75,7 +75,8 @@ class InputReader(object):
     def __call__(self, params, input_context=None):
 
         batch_size = params['batch_size'] if 'batch_size' in params else 1
-
+        do_dist_eval = params['dist_eval']
+        
         try:
             seed = params['seed'] if not MPI_is_distributed() else params['seed'] * MPI_rank()
         except (KeyError, TypeError):
@@ -117,6 +118,20 @@ class InputReader(object):
 
             except NameError:  # Not a distributed training setup
                 pass
+        elif do_dist_eval and (self._mode == tf.estimator.ModeKeys.PREDICT or self._mode == tf.estimator.ModeKeys.EVAL):
+            # 32 validation tf records - distribute on upto 32 workers
+            if MPI_is_distributed():
+                logging.info("Using Evaluation Dataset Sharding with Horovod")
+                _shard_idx, _num_shards = MPI_rank_and_size()
+                max_shards = min(_num_shards, 32)
+                try:
+                    dataset = dataset.shard(
+                        num_shards=max_shards,
+                        index=_shard_idx % max_shards
+                    )
+                except NameError:  # Not a distributed training setup
+                    pass
+        
 
         def _prefetch_dataset(filename):
             return tf.data.TFRecordDataset(filename).prefetch(1)
@@ -133,7 +148,6 @@ class InputReader(object):
             dataset = dataset.take(self._num_examples)
 
         dataset = dataset.cache()
-
         if self._mode == tf.estimator.ModeKeys.TRAIN:
             dataset = dataset.shuffle(
                 buffer_size=4096,
@@ -313,6 +327,8 @@ if __name__ == "__main__":
     parser.add_argument("--training", default=False, action="store_true", help="Benchmark in training mode")
 
     parser.add_argument("--use_synthetic_data", default=False, action="store_true", help="Use synthetic dataset")
+    
+    parser.add_argument("--dist_eval", default=False, action="store_true", help="Do distributed evaluation")
 
     FLAGS, unknown_args = parser.parse_known_args()
 

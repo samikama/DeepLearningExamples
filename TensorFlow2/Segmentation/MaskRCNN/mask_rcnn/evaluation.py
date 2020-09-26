@@ -26,8 +26,11 @@ import operator
 import pprint
 import six
 import time
-
+import itertools
+import collections
 import io
+import threading
+
 from PIL import Image
 
 import numpy as np
@@ -39,6 +42,7 @@ from mask_rcnn import coco_metric
 from mask_rcnn.utils import coco_utils
 
 from mask_rcnn.object_detection import visualization_utils
+from mask_rcnn.utils.distributed_utils import MPI_rank
 
 import dllogger
 from dllogger import Verbosity
@@ -65,7 +69,76 @@ def process_prediction_for_eval(prediction):
     return prediction
 
 
-def compute_coco_eval_metric(predictor,
+def get_predictions(predictor,
+                    num_batches=-1,
+                    eval_batch_size=-1):
+
+    predictions = dict()
+    batch_idx = 0
+
+    T0 = time.time()
+    while num_batches < 0 or batch_idx < num_batches:
+
+        try:
+            step_t0 = time.time()
+            step_predictions = six.next(predictor)
+            batch_time = time.time() - step_t0
+
+            throughput = eval_batch_size / batch_time
+
+            logging.info('Running inference on batch %03d/%03d... - Step Time: %.4fs - Throughput: %.1f imgs/s' % (
+                batch_idx + 1,
+                num_batches,
+                batch_time,
+                throughput
+            ))
+
+        except StopIteration:
+            logging.info('Get StopIteration at %d batch.' % (batch_idx + 1))
+            break
+
+        step_predictions = process_prediction_for_eval(step_predictions)
+
+        for k, v in step_predictions.items():
+
+            if k not in predictions:
+                predictions[k] = [v]
+
+            else:
+                predictions[k].append(v)
+
+        batch_idx = batch_idx + 1
+    logging.info('Inference took {}s'.format(time.time() - T0))
+    return predictions
+
+
+def compute_coco_eval_metric_n(predictions,
+                             source_ids,
+                             include_mask=True,
+                             annotation_json_file=""):
+    """Compute COCO eval metric given a predictions.
+    """
+    logging.info("Metric calculation started {}".format(time.time()))
+    if annotation_json_file == "":
+        annotation_json_file = None
+
+    eval_metric = coco_metric.EvaluationMetric(annotation_json_file, include_mask=include_mask)
+    eval_results = eval_metric.predict_metric_fn2(predictions, source_ids)
+
+    logging.info("==================== Metrics ====================")
+
+    # logging.info('Eval Epoch results: %s' % pprint.pformat(eval_results, indent=4))
+    for key, value in sorted(eval_results.items(), key=operator.itemgetter(0)):
+        logging.info("%s: %.9f" % (key, value))
+    print()  # Visual Spacing
+    logging.info("Metric calculation ended {}".format(time.time()))
+    return eval_results
+
+
+
+
+
+def compute_coco_eval_metric_1(predictor,
                              num_batches=-1,
                              include_mask=True,
                              annotation_json_file="",
@@ -95,7 +168,6 @@ def compute_coco_eval_metric(predictor,
 
     if use_groundtruth_from_json:
         eval_metric = coco_metric.EvaluationMetric(annotation_json_file, include_mask=include_mask)
-
     else:
         eval_metric = coco_metric.EvaluationMetric(filename=None, include_mask=include_mask)
 
@@ -168,6 +240,7 @@ def compute_coco_eval_metric(predictor,
             logging.info('Eval results: %s' % pprint.pformat(eval_results, indent=4))
 
     inference_time_list.sort()
+    logging.info(predictions['source_id'])
     eval_results = evaluation_preds(preds=predictions)
 
     average_time = np.mean(inference_time_list)
@@ -219,8 +292,14 @@ def compute_coco_eval_metric(predictor,
     for key, value in sorted(eval_results.items(), key=operator.itemgetter(0)):
         logging.info("%s: %.9f" % (key, value))
     print()  # Visual Spacing
-
     return eval_results, predictions
+
+
+def gather_result_from_all_processes(local_results, root=0):
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    res = comm.gather(local_results,root=root)
+    return res
 
 
 def evaluate(eval_estimator,
@@ -229,11 +308,14 @@ def evaluate(eval_estimator,
              eval_batch_size,
              include_mask=True,
              validation_json_file="",
-             report_frequency=None):
+             report_frequency=None,
+             latest_ckpt=None,
+             do_distributed=False):
 
     """Runs COCO evaluation once."""
     predictor = eval_estimator.predict(
         input_fn=input_fn,
+        checkpoint_path=latest_ckpt,
         yield_single_examples=False
     )
 
@@ -241,16 +323,57 @@ def evaluate(eval_estimator,
     num_eval_times = num_eval_samples // eval_batch_size
     assert num_eval_times > 0, 'num_eval_samples must be >= eval_batch_size!'
 
-    eval_results, predictions = compute_coco_eval_metric(
-        predictor,
-        num_eval_times,
-        include_mask,
-        validation_json_file,
-        eval_batch_size=eval_batch_size,
-        report_frequency=report_frequency
-    )
+    if do_distributed:
+        worker_predictions = get_predictions(predictor,
+            num_batches=num_eval_times,
+            eval_batch_size=eval_batch_size)
+        logging.info(worker_predictions['source_id'])
+        # DEBUG - print worker predictions
+        # _ = compute_coco_eval_metric_n(worker_predictions, False, validation_json_file)
+        coco = coco_metric.MaskCOCO()
+        _preds = copy.deepcopy(worker_predictions)
+        for k, v in _preds.items():
+            # combined all results in flat structure for eval
+            _preds[k] = np.concatenate(v, axis=0)
+        if MPI_rank() < 32:
+            converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+            worker_source_ids = _preds['source_id']
+        else:
+            converted_predictions = []
+            worker_source_ids = []
 
-    return eval_results, predictions
+        # logging.info(converted_predictions)
+        # gather on rank 0
+        predictions_list = gather_result_from_all_processes(converted_predictions)
+        source_ids_list = gather_result_from_all_processes(worker_source_ids)
+        if MPI_rank() == 0:
+            all_predictions = []
+            source_ids = []
+            for i, p in enumerate(predictions_list):
+                if i < 32: # max eval workers (TODO config)
+                    all_predictions.extend(p)
+            for i, s in enumerate(source_ids_list):
+                if i < 32:
+                    source_ids.extend(s)
+
+            # run metric calculation on root node TODO: launch this in it's own thread
+            args = [all_predictions, source_ids, include_mask, validation_json_file]
+            eval_thread = threading.Thread(target=compute_coco_eval_metric_n, name="eval-thread", args=args)
+            eval_thread.start()
+            logging.info("Launched compute eval metrics thread ...")
+            return eval_thread
+        return None
+    else:
+        eval_results, predictions = compute_coco_eval_metric_1(
+            predictor,
+            num_eval_times,
+            include_mask,
+            validation_json_file,
+            eval_batch_size=eval_batch_size,
+            report_frequency=report_frequency
+        )
+
+        return eval_results, predictions
 
 
 def write_summary(eval_results, summary_dir, current_step, predictions=None):

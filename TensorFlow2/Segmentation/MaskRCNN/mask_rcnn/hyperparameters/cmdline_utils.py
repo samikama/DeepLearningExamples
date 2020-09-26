@@ -64,6 +64,13 @@ def define_hparams_flags():
             ' from input by setting `include_groundtruth_in_features`=True'
         )
     )
+    
+    flags.DEFINE_bool(
+        'dist_eval',
+        default=False,
+        help=('If set then distribute evaluation amongst all workers'
+        )
+    )
 
     # Gradient clipping is a fairly coarse heuristic to stabilize training.
     # This model clips the gradient by its L2 norm globally (i.e., across
@@ -83,6 +90,10 @@ def define_hparams_flags():
     flags.DEFINE_float("l2_weight_decay", default=1e-4, help="l2 regularization weight")
 
     flags.DEFINE_string('mode', default='train_and_eval', help='Mode to run: train or eval')
+    
+    flags.DEFINE_string('optimizer_type', default='SGD', help='Optimizer to use - SGD or LAMB')
+    
+    flags.DEFINE_string('lr_schedule', default='piecewise', help='Learning rate schedule - piecewise or cosine')
 
     flags.DEFINE_string(
         'model_dir',

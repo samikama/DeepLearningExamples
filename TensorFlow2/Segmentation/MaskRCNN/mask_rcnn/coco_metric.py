@@ -45,6 +45,9 @@ class MaskCOCO(COCO):
   """COCO object for mask evaluation.
   """
 
+  #  def __init__(self, annotation_file=None, use_ext=False):
+  #      super().__init__(annotation_file=annotation_file, use_ext=use_ext)
+
   def reset(self, dataset):
     """Reset the dataset and groundtruth data index in this object.
 
@@ -70,7 +73,7 @@ class MaskCOCO(COCO):
                           type(dataset))
     self.anns, self.cats, self.imgs = dict(), dict(), dict()
     self.dataset = copy.deepcopy(dataset)
-    self.createIndex()
+    self.createIndex(use_ext=True)
 
   def loadRes(self, detection_results, include_mask, is_image_mask=False):
     """Load result file and return a result api object.
@@ -83,7 +86,7 @@ class MaskCOCO(COCO):
     Returns:
       res: result MaskCOCO api object
     """
-    res = MaskCOCO()
+    res = MaskCOCO() # use_ext=self.use_ext)
     res.dataset['images'] = [img for img in self.dataset['images']]
     logging.info('Loading and preparing results...')
     predictions = self.load_predictions(
@@ -118,7 +121,51 @@ class MaskCOCO(COCO):
 
       res.dataset['annotations'] = predictions
 
-    res.createIndex()
+    res.createIndex() # use_ext=True)
+    return res
+
+  def loadRes2(self, predictions, include_mask, is_image_mask=False):
+    """Load result file and return a result api object.
+    
+    Args:
+      include_mask: a boolean, whether to include mask in detection results.
+      is_image_mask: a boolean, where the predict mask is a whole image mask.
+    
+    Returns:
+      res: result MaskCOCO api object
+    """
+    res = MaskCOCO() # use_ext=self.use_ext)
+    res.dataset['images'] = [img for img in self.dataset['images']]
+    logging.info('Loading and preparing results...')
+    assert isinstance(predictions, list), 'results in not an array of objects'
+    if predictions:
+      image_ids = [pred['image_id'] for pred in predictions]
+      assert set(image_ids) == (set(image_ids) & set(self.getImgIds())), \
+             'Results do not correspond to current coco set'
+
+      if (predictions and 'bbox' in predictions[0] and predictions[0]['bbox']):
+        res.dataset['categories'] = copy.deepcopy(self.dataset['categories'])
+        for idx, pred in enumerate(predictions):
+          bb = pred['bbox']
+          x1, x2, y1, y2 = [bb[0], bb[0] + bb[2], bb[1], bb[1] + bb[3]]
+          if 'segmentation' not in pred:
+            pred['segmentation'] = [[x1, y1, x1, y2, x2, y2, x2, y1]]
+          pred['area'] = bb[2] * bb[3]
+          pred['id'] = idx + 1
+          pred['iscrowd'] = 0
+      elif 'segmentation' in predictions[0]:
+        res.dataset['categories'] = copy.deepcopy(self.dataset['categories'])
+        for idx, pred in enumerate(predictions):
+          # now only support compressed RLE format as segmentation results
+          pred['area'] = maskUtils.area(pred['segmentation'])
+          if 'bbox' not in pred:
+            pred['bbox'] = maskUtils.toBbox(pred['segmentation'])
+          pred['id'] = idx + 1
+          pred['iscrowd'] = 0
+
+      res.dataset['annotations'] = predictions
+
+    res.createIndex() # use_ext=True)
     return res
 
   def load_predictions(self,
@@ -294,7 +341,7 @@ class EvaluationMetric(object):
         atexit.register(tf.io.gfile.remove, local_val_json)
       else:
         local_val_json = filename
-      self.coco_gt = MaskCOCO(local_val_json)
+      self.coco_gt = MaskCOCO(local_val_json) #, use_ext=True)
     self.filename = filename
     self.metric_names = ['AP', 'AP50', 'AP75', 'APs', 'APm', 'APl', 'ARmax1',
                          'ARmax10', 'ARmax100', 'ARs', 'ARm', 'ARl']
@@ -308,8 +355,51 @@ class EvaluationMetric(object):
   def _reset(self):
     """Reset COCO API object."""
     if self.filename is None and not hasattr(self, 'coco_gt'):
-      self.coco_gt = MaskCOCO()
+      self.coco_gt = MaskCOCO() #use_ext=True)
 
+  def predict_metric_fn2(self,
+                        predictions,
+                        source_ids,
+                        is_predict_image_mask=False,
+                        groundtruth_data=None):
+    """Generates COCO metrics."""
+    image_ids = list(set(source_ids))
+ 
+    if groundtruth_data is not None:
+      self.coco_gt.reset(groundtruth_data)
+    coco_dt = self.coco_gt.loadRes2(
+        predictions, self._include_mask, is_image_mask=is_predict_image_mask)
+    coco_eval = COCOeval(self.coco_gt, coco_dt, iouType='bbox') #, use_ext=True, num_threads=32) 
+    coco_eval.params.imgIds = image_ids
+    coco_eval.evaluate()
+    coco_eval.accumulate()
+    coco_eval.summarize()
+    coco_metrics = coco_eval.stats
+
+    if self._include_mask:
+      # Create another object for instance segmentation metric evaluation.
+      mcoco_eval = COCOeval(self.coco_gt, coco_dt, iouType='segm') # , use_ext=True, num_threads=32)
+      mcoco_eval.params.imgIds = image_ids
+      mcoco_eval.evaluate()
+      mcoco_eval.accumulate()
+      mcoco_eval.summarize()
+      mask_coco_metrics = mcoco_eval.stats
+
+    if self._include_mask:
+      metrics = np.hstack((coco_metrics, mask_coco_metrics))
+    else:
+      metrics = coco_metrics
+
+    # clean up after evaluation is done.
+    self._reset()
+    metrics = metrics.astype(np.float32)
+
+    metrics_dict = {}
+    for i, name in enumerate(self.metric_names):
+      metrics_dict[name] = metrics[i]
+    return metrics_dict
+  
+  
   def predict_metric_fn(self,
                         predictions,
                         is_predict_image_mask=False,
@@ -320,7 +410,7 @@ class EvaluationMetric(object):
       self.coco_gt.reset(groundtruth_data)
     coco_dt = self.coco_gt.loadRes(
         predictions, self._include_mask, is_image_mask=is_predict_image_mask)
-    coco_eval = COCOeval(self.coco_gt, coco_dt, iouType='bbox')
+    coco_eval = COCOeval(self.coco_gt, coco_dt, iouType='bbox') #, use_ext=True, num_threads=32)
     coco_eval.params.imgIds = image_ids
     coco_eval.evaluate()
     coco_eval.accumulate()
@@ -329,7 +419,7 @@ class EvaluationMetric(object):
 
     if self._include_mask:
       # Create another object for instance segmentation metric evaluation.
-      mcoco_eval = COCOeval(self.coco_gt, coco_dt, iouType='segm')
+      mcoco_eval = COCOeval(self.coco_gt, coco_dt, iouType='segm') # , use_ext=True, num_threads=32)
       mcoco_eval.params.imgIds = image_ids
       mcoco_eval.evaluate()
       mcoco_eval.accumulate()

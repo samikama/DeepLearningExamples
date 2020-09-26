@@ -20,8 +20,9 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
+import functools
 import tensorflow as tf
+import tensorflow_addons as tfa
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.keras import backend
 
@@ -85,6 +86,57 @@ class BNReLULayer(KerasMockLayer):
         except KeyError:
             return net
 
+
+class GNReLULayer(KerasMockLayer):
+    def __init__(self, trainable, relu=True, init_zero=False, data_format='channels_last'):
+        """Performs a batch normalization followed by a ReLU.
+        
+        Args:
+        inputs: `Tensor` of shape `[batch, channels, ...]`.
+        trainable: `bool` for whether to train groupnorm layer.
+        relu: `bool` if False, omits the ReLU operation.
+        init_zero: `bool` if True, initializes scale parameter of batch
+            normalization with 0 instead of 1 (default).
+        data_format: `str` either "channels_first" for `[batch, channels, height,
+            width]` or "channels_last for `[batch, height, width, channels]`.
+            
+        Returns:
+        A normalized `Tensor` with the same `data_format`.
+        """
+        super(GNReLULayer, self).__init__(trainable=trainable)
+
+        if init_zero:
+            gamma_initializer = tf.keras.initializers.Zeros()
+        else:
+            gamma_initializer = tf.keras.initializers.Ones()
+
+        if data_format == 'channels_first':
+            axis = 1
+        else:
+            axis = 3
+
+        self._local_layers = dict()
+        self._local_layers["groupnorm"] = tfa.layers.GroupNormalization(
+            axis=axis,
+            groups=32,
+            epsilon=1e-5,
+            trainable=True,
+            gamma_initializer=gamma_initializer,
+            name="group_normalization"
+        )
+
+        if relu:
+            self._local_layers["relu"] = tf.keras.layers.ReLU()
+
+    def __call__(self, inputs, training=False, *args, **kwargs):
+
+        net = self._local_layers["groupnorm"](inputs, training=training)
+
+        try:
+            return self._local_layers["relu"](net)
+        except KeyError:
+            return net
+        
 
 class FixedPaddingLayer(KerasMockLayer):
     def __init__(self, kernel_size, data_format='channels_last', trainable=True):
@@ -167,7 +219,7 @@ class Conv2dFixedPadding(KerasMockLayer):
 
 
 class ResidualBlock(KerasMockLayer):
-    def __init__(self, filters, trainable, finetune_bn, strides, use_projection=False, data_format='channels_last'):
+    def __init__(self, filters, trainable, finetune_bn, strides, use_projection=False, data_format='channels_last', norm_type='batchnorm'):
         """Standard building block for residual networks with BN after convolutions.
 
         Args:
@@ -185,7 +237,7 @@ class ResidualBlock(KerasMockLayer):
         super(ResidualBlock, self).__init__(trainable=trainable)
 
         self._finetune_bn = finetune_bn
-
+        self.norm_type = norm_type
         if use_projection:
             self._local_layers["projection"] = dict()
 
@@ -196,13 +248,22 @@ class ResidualBlock(KerasMockLayer):
                 data_format=data_format,
                 trainable=trainable
             )
-
-            self._local_layers["projection"]["batchnorm"] = BNReLULayer(
-                trainable=finetune_bn and trainable,
-                relu=False,
-                init_zero=False,
-                data_format=data_format,
-            )
+            if norm_type == 'batchnorm':
+                self._local_layers["projection"]["batchnorm"] = BNReLULayer(
+                    trainable=finetune_bn and trainable,
+                    relu=False,
+                    init_zero=False,
+                    data_format=data_format,
+                )
+            elif norm_type == 'groupnorm':
+                self._local_layers["projection"]["groupnorm"] = GNReLULayer(
+                    trainable=True,
+                    relu=False,
+                    init_zero=False,
+                    data_format=data_format,
+                )
+            else:
+                raise NotImplementedError
 
         self._local_layers["conv2d_1"] = Conv2dFixedPadding(
             trainable=trainable,
@@ -220,19 +281,34 @@ class ResidualBlock(KerasMockLayer):
             data_format=data_format,
         )
 
-        self._local_layers["batchnorm_1"] = BNReLULayer(
-            trainable=finetune_bn and trainable,
-            relu=True,
-            init_zero=False,
-            data_format=data_format,
-        )
+        if norm_type == 'batchnorm':
+            self._local_layers["batchnorm_1"] = BNReLULayer(
+                trainable=finetune_bn and trainable,
+                relu=True,
+                init_zero=False,
+                data_format=data_format,
+            )
 
-        self._local_layers["batchnorm_2"] = BNReLULayer(
-            trainable=finetune_bn and trainable,
-            relu=False,
-            init_zero=True,
-            data_format=data_format,
-        )
+            self._local_layers["batchnorm_2"] = BNReLULayer(
+                trainable=finetune_bn and trainable,
+                relu=False,
+                init_zero=True,
+                data_format=data_format,
+            )
+        elif norm_type == 'groupnorm':
+            self._local_layers["groupnorm_1"] = GNReLULayer(
+                trainable=True,
+                relu=True,
+                init_zero=False,
+                data_format=data_format,
+            )
+
+            self._local_layers["groupnorm_2"] = GNReLULayer(
+                trainable=True,
+                relu=False,
+                init_zero=True,
+                data_format=data_format,
+            )
 
         self._local_layers["activation"] = tf.keras.layers.ReLU()
 
@@ -249,10 +325,16 @@ class ResidualBlock(KerasMockLayer):
             # Projection shortcut in first layer to match filters and strides
             shortcut = self._local_layers["projection"]["conv2d"](inputs=inputs)
 
-            shortcut = self._local_layers["projection"]["batchnorm"](
-                inputs=shortcut,
-                training=training and self._trainable and self._finetune_bn
-            )
+            if self.norm_type == 'batchnorm':
+                shortcut = self._local_layers["projection"]["batchnorm"](
+                    inputs=shortcut,
+                    training=training and self._trainable and self._finetune_bn
+                )
+            elif self.norm_type == 'groupnorm':
+                shortcut = self._local_layers["projection"]["groupnorm"](
+                    inputs=shortcut,
+                    training=training 
+                )
 
         except KeyError:
             shortcut = inputs
@@ -261,17 +343,22 @@ class ResidualBlock(KerasMockLayer):
 
         for i in range(1, 3):
             net = self._local_layers["conv2d_%d" % i](inputs=net)
-
-            net = self._local_layers["batchnorm_%d" % i](
-                inputs=net,
-                training=training and self._trainable and self._finetune_bn
-            )
+            if self.norm_type == 'batchnorm':
+                net = self._local_layers["batchnorm_%d" % i](
+                    inputs=net,
+                    training=training and self._trainable and self._finetune_bn
+                )
+            elif self.norm_type == 'groupnorm':
+                net = self._local_layers["groupnorm_%d" % i](
+                    inputs=net,
+                    training=training
+                )
 
         return self._local_layers["activation"](net + shortcut)
 
 
 class BottleneckBlock(KerasMockLayer):
-    def __init__(self, filters, trainable, finetune_bn, strides, use_projection=False, data_format='channels_last'):
+    def __init__(self, filters, trainable, finetune_bn, strides, use_projection=False, data_format='channels_last', norm_type="batchnorm"):
         """Bottleneck block variant for residual networks with BN after convolutions.
 
         Args:
@@ -289,14 +376,15 @@ class BottleneckBlock(KerasMockLayer):
         super(BottleneckBlock, self).__init__(trainable=trainable)
 
         self._finetune_bn = finetune_bn
-
+        self.norm_type = norm_type
+        
         if use_projection:
             # Projection shortcut only in first block within a group. Bottleneck blocks
             # end with 4 times the number of filters.
             filters_out = 4 * filters
 
             self._local_layers["projection"] = dict()
-
+            
             self._local_layers["projection"]["conv2d"] = Conv2dFixedPadding(
                 filters=filters_out,
                 kernel_size=1,
@@ -305,12 +393,22 @@ class BottleneckBlock(KerasMockLayer):
                 trainable=trainable
             )
 
-            self._local_layers["projection"]["batchnorm"] = BNReLULayer(
-                trainable=finetune_bn and trainable,
-                relu=False,
-                init_zero=False,
-                data_format=data_format,
-            )
+            if norm_type == "batchnorm":
+                self._local_layers["projection"]["batchnorm"] = BNReLULayer(
+                    trainable=finetune_bn and trainable,
+                    relu=False,
+                    init_zero=False,
+                    data_format=data_format,
+                )
+            elif norm_type == "groupnorm":
+                self._local_layers["projection"]["groupnorm"] = GNReLULayer(
+                    trainable=True,
+                    relu=False,
+                    init_zero=False,
+                    data_format=data_format,
+                )
+            else:
+                raise NotImplementedError
 
         self._local_layers["conv2d_1"] = Conv2dFixedPadding(
             filters=filters,
@@ -336,26 +434,48 @@ class BottleneckBlock(KerasMockLayer):
             trainable=trainable
         )
 
-        self._local_layers["batchnorm_1"] = BNReLULayer(
-            trainable=finetune_bn and trainable,
-            relu=True,
-            init_zero=False,
-            data_format=data_format,
-        )
+        if norm_type == "batchnorm":
+            self._local_layers["batchnorm_1"] = BNReLULayer(
+                trainable=finetune_bn and trainable,
+                relu=True,
+                init_zero=False,
+                data_format=data_format,
+            )
 
-        self._local_layers["batchnorm_2"] = BNReLULayer(
-            trainable=finetune_bn and trainable,
-            relu=True,
-            init_zero=False,
-            data_format=data_format,
-        )
+            self._local_layers["batchnorm_2"] = BNReLULayer(
+                trainable=finetune_bn and trainable,
+                relu=True,
+                init_zero=False,
+                data_format=data_format,
+            )
 
-        self._local_layers["batchnorm_3"] = BNReLULayer(
-            trainable=finetune_bn and trainable,
-            relu=False,
-            init_zero=True,
-            data_format=data_format,
-        )
+            self._local_layers["batchnorm_3"] = BNReLULayer(
+                trainable=finetune_bn and trainable,
+                relu=False,
+                init_zero=True,
+                data_format=data_format,
+            )
+        elif norm_type == "groupnorm":
+            self._local_layers["groupnorm_1"] = GNReLULayer(
+                trainable=True,
+                relu=True,
+                init_zero=False,
+                data_format=data_format,
+            )
+
+            self._local_layers["groupnorm_2"] = GNReLULayer(
+                trainable=True,
+                relu=True,
+                init_zero=False,
+                data_format=data_format,
+            )
+
+            self._local_layers["groupnorm_3"] = GNReLULayer(
+                trainable=True,
+                relu=False,
+                init_zero=True,
+                data_format=data_format,
+            )
 
         self._local_layers["activation"] = tf.keras.layers.ReLU()
 
@@ -371,11 +491,16 @@ class BottleneckBlock(KerasMockLayer):
         try:
             # Projection shortcut in first layer to match filters and strides
             shortcut = self._local_layers["projection"]["conv2d"](inputs=inputs)
-
-            shortcut = self._local_layers["projection"]["batchnorm"](
-                inputs=shortcut,
-                training=training and self._trainable and self._finetune_bn
-            )
+            if self.norm_type == 'batchnorm':
+                shortcut = self._local_layers["projection"]["batchnorm"](
+                    inputs=shortcut,
+                    training=training and self._trainable and self._finetune_bn
+                )
+            elif self.norm_type == 'groupnorm':
+                shortcut = self._local_layers["projection"]["groupnorm"](
+                    inputs=shortcut,
+                    training=training 
+                )
 
         except KeyError:
             shortcut = inputs
@@ -384,17 +509,22 @@ class BottleneckBlock(KerasMockLayer):
 
         for i in range(1, 4):
             net = self._local_layers["conv2d_%d" % i](inputs=net)
-
-            net = self._local_layers["batchnorm_%d" % i](
-                inputs=net,
-                training=training and self._trainable and self._finetune_bn
-            )
+            if self.norm_type == 'batchnorm':
+                net = self._local_layers["batchnorm_%d" % i](
+                    inputs=net,
+                    training=training and self._trainable and self._finetune_bn
+                )
+            elif self.norm_type == 'groupnorm':
+                net = self._local_layers["groupnorm_%d" % i](
+                    inputs=net,
+                    training=training
+                )
 
         return self._local_layers["activation"](net + shortcut)
 
 
 class BlockGroup(KerasMockLayer):
-    def __init__(self, filters, block_layer, n_blocks, strides, trainable, finetune_bn, data_format='channels_last'):
+    def __init__(self, filters, block_layer, n_blocks, strides, trainable, finetune_bn, data_format='channels_last', norm_type='batchnorm'):
         """Creates one group of blocks for the ResNet model.
 
         Args:
@@ -426,7 +556,8 @@ class BlockGroup(KerasMockLayer):
                 trainable=trainable,
                 strides=strides if block_id == 0 else 1,
                 use_projection=block_id == 0,
-                data_format=data_format
+                data_format=data_format,
+                norm_type=norm_type
             )
 
     def __call__(self, inputs, training=False):
@@ -440,7 +571,7 @@ class BlockGroup(KerasMockLayer):
 
 
 class Resnet_Model(KerasMockLayer, tf.keras.models.Model):
-    def __init__(self, resnet_model, data_format='channels_last', trainable=True, finetune_bn=False, *args, **kwargs):
+    def __init__(self, resnet_model, data_format='channels_last', trainable=True, finetune_bn=False, norm_type='batchnorm', *args, **kwargs):
         """
         Our actual ResNet network.  We return the output of c2, c3,c4,c5
         N.B. batch norm is always run with trained parameters, as we use very small
@@ -469,93 +600,167 @@ class Resnet_Model(KerasMockLayer, tf.keras.models.Model):
         super(Resnet_Model, self).__init__(trainable=trainable, name=resnet_model, *args, **kwargs)
 
         self._finetune_bn = finetune_bn
-
+        self.norm_type = norm_type
         self._data_format = data_format
         self._block_layer = model_params[resnet_model]['block']
         self._n_layers = model_params[resnet_model]['layers']
+        if norm_type == 'batchnorm':
+            self._local_layers["conv2d"] = Conv2dFixedPadding(
+                filters=64,
+                kernel_size=7,
+                strides=2,
+                data_format=self._data_format,
+                # Freeze at conv2d and batchnorm first 11 layers based on reference model.
+                # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
+                trainable=False
+            )
 
-        self._local_layers["conv2d"] = Conv2dFixedPadding(
-            filters=64,
-            kernel_size=7,
-            strides=2,
-            data_format=self._data_format,
-            # Freeze at conv2d and batchnorm first 11 layers based on reference model.
-            # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
-            trainable=False
-        )
+            self._local_layers["batchnorm"] = BNReLULayer(
+                relu=True,
+                init_zero=False,
+                data_format=self._data_format,
+                # Freeze at conv2d and batchnorm first 11 layers based on reference model.
+                # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
+                trainable=False
+            )
+            self._local_layers["maxpool2d"] = tf.keras.layers.MaxPool2D(
+                pool_size=3,
+                strides=2,
+                padding='SAME',
+                data_format=self._data_format
+            )
 
-        self._local_layers["batchnorm"] = BNReLULayer(
-            relu=True,
-            init_zero=False,
-            data_format=self._data_format,
-            # Freeze at conv2d and batchnorm first 11 layers based on reference model.
-            # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
-            trainable=False
-        )
+            self._local_layers["block_1"] = BlockGroup(
+                filters=64,
+                strides=1,
+                n_blocks=self._n_layers[0],
+                block_layer=self._block_layer,
+                data_format=self._data_format,
+                # Freeze at conv2d and batchnorm first 11 layers based on reference model.
+                # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
+                trainable=False,
+                finetune_bn=False
+            )
 
-        self._local_layers["maxpool2d"] = tf.keras.layers.MaxPool2D(
-            pool_size=3,
-            strides=2,
-            padding='SAME',
-            data_format=self._data_format
-        )
+            self._local_layers["block_2"] = BlockGroup(
+                filters=128,
+                strides=2,
+                n_blocks=self._n_layers[1],
+                block_layer=self._block_layer,
+                data_format=self._data_format,
+                # Freeze at conv2d and batchnorm first 11 layers based on reference model.
+                # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
+                trainable=self._trainable,
+                finetune_bn=self._finetune_bn
+            )
 
-        self._local_layers["block_1"] = BlockGroup(
-            filters=64,
-            strides=1,
-            n_blocks=self._n_layers[0],
-            block_layer=self._block_layer,
-            data_format=self._data_format,
-            # Freeze at conv2d and batchnorm first 11 layers based on reference model.
-            # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
-            trainable=False,
-            finetune_bn=False
-        )
+            self._local_layers["block_3"] = BlockGroup(
+                filters=256,
+                strides=2,
+                n_blocks=self._n_layers[2],
+                block_layer=self._block_layer,
+                data_format=self._data_format,
+                # Freeze at conv2d and batchnorm first 11 layers based on reference model.
+                # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
+                trainable=self._trainable,
+                finetune_bn=self._finetune_bn
+            )
 
-        self._local_layers["block_2"] = BlockGroup(
-            filters=128,
-            strides=2,
-            n_blocks=self._n_layers[1],
-            block_layer=self._block_layer,
-            data_format=self._data_format,
-            # Freeze at conv2d and batchnorm first 11 layers based on reference model.
-            # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
-            trainable=self._trainable,
-            finetune_bn=self._finetune_bn
-        )
+            self._local_layers["block_4"] = BlockGroup(
+                filters=512,
+                strides=2,
+                n_blocks=self._n_layers[3],
+                block_layer=self._block_layer,
+                data_format=self._data_format,
+                # Freeze at conv2d and batchnorm first 11 layers based on reference model.
+                # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
+                trainable=self._trainable,
+                finetune_bn=self._finetune_bn
+            )
+        elif norm_type == 'groupnorm':
+            self._local_layers["conv2d"] = Conv2dFixedPadding(
+                    filters=64,
+                    kernel_size=7,
+                    strides=2,
+                    data_format=self._data_format,
+                    trainable=False
+                )
 
-        self._local_layers["block_3"] = BlockGroup(
-            filters=256,
-            strides=2,
-            n_blocks=self._n_layers[2],
-            block_layer=self._block_layer,
-            data_format=self._data_format,
-            # Freeze at conv2d and batchnorm first 11 layers based on reference model.
-            # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
-            trainable=self._trainable,
-            finetune_bn=self._finetune_bn
-        )
+            self._local_layers["groupnorm"] = GNReLULayer(
+                    relu=True,
+                    init_zero=False,
+                    data_format=self._data_format,
+                    trainable=True
+                )
+            self._local_layers["maxpool2d"] = tf.keras.layers.MaxPool2D(
+                pool_size=3,
+                strides=2,
+                padding='SAME',
+                data_format=self._data_format
+            )
 
-        self._local_layers["block_4"] = BlockGroup(
-            filters=512,
-            strides=2,
-            n_blocks=self._n_layers[3],
-            block_layer=self._block_layer,
-            data_format=self._data_format,
-            # Freeze at conv2d and batchnorm first 11 layers based on reference model.
-            # Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/core/config.py#L194
-            trainable=self._trainable,
-            finetune_bn=self._finetune_bn
-        )
+            self._local_layers["block_1"] = BlockGroup(
+                filters=64,
+                strides=1,
+                n_blocks=self._n_layers[0],
+                block_layer=self._block_layer,
+                data_format=self._data_format,
+                trainable=False,
+                finetune_bn=False,
+                norm_type=norm_type
+            )
+
+            self._local_layers["block_2"] = BlockGroup(
+                filters=128,
+                strides=2,
+                n_blocks=self._n_layers[1],
+                block_layer=self._block_layer,
+                data_format=self._data_format,
+                trainable=self._trainable,
+                finetune_bn=self._finetune_bn,
+                norm_type=norm_type
+            )
+
+            self._local_layers["block_3"] = BlockGroup(
+                filters=256,
+                strides=2,
+                n_blocks=self._n_layers[2],
+                block_layer=self._block_layer,
+                data_format=self._data_format,
+                trainable=self._trainable,
+                finetune_bn=self._finetune_bn,
+                norm_type=norm_type
+            )
+
+            self._local_layers["block_4"] = BlockGroup(
+                filters=512,
+                strides=2,
+                n_blocks=self._n_layers[3],
+                block_layer=self._block_layer,
+                data_format=self._data_format,
+                trainable=self._trainable,
+                finetune_bn=self._finetune_bn,
+                norm_type=norm_type
+            )
+        else:
+            raise NotImplementedError
+            
+            
 
     def call(self, inputs, training=True, *args, **kwargs):
         """Creation of the model graph."""
         net = self._local_layers["conv2d"](inputs=inputs)
 
-        net = self._local_layers["batchnorm"](
-            inputs=net,
-            training=False
-        )
+        if self.norm_type == 'batchnorm':
+            net = self._local_layers["batchnorm"](
+                inputs=net,
+                training=False
+            )
+        elif self.norm_type == 'groupnorm':
+                net = self._local_layers["groupnorm"](
+                inputs=net,
+                training=training
+            )
 
         net = self._local_layers["maxpool2d"](net)
 
