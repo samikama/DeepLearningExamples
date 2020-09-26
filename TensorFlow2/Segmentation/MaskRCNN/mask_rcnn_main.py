@@ -37,7 +37,8 @@ from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 
 from mask_rcnn import dataloader
 from mask_rcnn import distributed_executer
-from mask_rcnn import mask_rcnn_model
+from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
+from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
 
 from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn.hyperparameters import params_io
@@ -52,7 +53,7 @@ FLAGS = define_hparams_flags()
 
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
-
+    mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1
     if runtime_config.use_tf_distributed:
         executer = distributed_executer.TFDistributedExecuter(runtime_config, mask_rcnn_model.mask_rcnn_model_fn)
     else:

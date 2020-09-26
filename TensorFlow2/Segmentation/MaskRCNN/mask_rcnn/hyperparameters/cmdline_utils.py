@@ -71,6 +71,13 @@ def define_hparams_flags():
         help=('If set then distribute evaluation amongst all workers'
         )
     )
+    
+    flags.DEFINE_bool(
+        'tf2',
+        default=False,
+        help=('Run using TF2 Keras.model'
+        )
+    )
 
     # Gradient clipping is a fairly coarse heuristic to stabilize training.
     # This model clips the gradient by its L2 norm globally (i.e., across

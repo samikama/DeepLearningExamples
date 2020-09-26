@@ -58,17 +58,16 @@ def get_training_hooks(mode, runtime_config): # model_dir, checkpoint_path=None,
 
     training_hooks = [
         AutoLoggingHook(
-            log_every_n_steps=5,
+            log_every_n_steps=500,
             #log_every_n_steps=5 if "NGC_JOB_ID" not in os.environ else 100,
             warmup_steps=runtime_config.warmup_steps,
             #warmup_steps=100,
             is_training=True
         )
     ]
-
     if not MPI_is_distributed() or MPI_rank() == 0:
         training_hooks.append(PretrainedWeightsLoadingHook(
-            prefix="resnet50/",
+            prefix="mrcnn/resnet50/" if runtime_config.tf2 else "resnet50/",
             checkpoint_path=checkpoint_path,
             skip_variables_regex=skip_checkpoint_variables
         ))
@@ -453,7 +452,7 @@ class BaseExecuter(object):
               max_steps=max_cycle_step,
               hooks=training_hooks,
           )
-      MIN_EVAL_EPOCH = 10
+      MIN_EVAL_EPOCH = 0
       if cycle < MIN_EVAL_EPOCH:
           continue
 

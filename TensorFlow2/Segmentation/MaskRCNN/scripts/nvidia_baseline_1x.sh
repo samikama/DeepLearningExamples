@@ -30,7 +30,7 @@ mkdir -p $BASEDIR/../results_1x
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --init_learning_rate=0.01 \
-        --learning_rate_steps="5625,7500" \
+        --learning_rate_steps="118280,162635" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../results_1x" \
@@ -38,7 +38,7 @@ mkdir -p $BASEDIR/../results_1x
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1800 \
         --global_gradient_clip_ratio=0.0 \
-        --total_steps=192202 \
+        --total_steps=192205 \
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
