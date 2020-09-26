@@ -16,8 +16,8 @@
 source activate tensorflow2_latest_p37
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../results_32x
-mkdir -p $BASEDIR/../results_32x
+rm -rf $BASEDIR/../results_tf2_32x
+mkdir -p $BASEDIR/../results_tf2_32x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     --hostfile ~/hosts \
@@ -33,7 +33,7 @@ mkdir -p $BASEDIR/../results_32x
         --learning_rate_steps="5625,7500" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../results_1x" \
+        --model_dir="$BASEDIR/../results_tf2_32x" \
         --num_steps_per_eval=462 \
         --first_eval=10 \
         --warmup_learning_rate=0.000133 \
@@ -51,5 +51,5 @@ mkdir -p $BASEDIR/../results_32x
         --use_batched_nms \
         --xla \
         --tf2 \
-        --use_custom_box_proposals_op | tee $BASEDIR/../results_32x/run_32x.log
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_32x/results_tf2_32x.log
 

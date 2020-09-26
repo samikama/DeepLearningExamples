@@ -29,6 +29,7 @@ mkdir -p $BASEDIR/../results_1x
         --mode="train_and_eval" \
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
+        --log_interval=100 \
         --init_learning_rate=0.01 \
         --learning_rate_steps="118280,162635" \
         --optimizer_type="SGD" \
@@ -49,4 +50,4 @@ mkdir -p $BASEDIR/../results_1x
         --amp \
         --use_batched_nms \
         --xla \
-        --use_custom_box_proposals_op | tee $BASEDIR/../results_1x/run_32x.log
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_1x/run_1x.log

@@ -58,7 +58,7 @@ def get_training_hooks(mode, runtime_config): # model_dir, checkpoint_path=None,
 
     training_hooks = [
         AutoLoggingHook(
-            log_every_n_steps=10,
+            log_every_n_steps=runtime_config.log_interval,
             #log_every_n_steps=5 if "NGC_JOB_ID" not in os.environ else 100,
             warmup_steps=runtime_config.warmup_steps,
             #warmup_steps=100,
