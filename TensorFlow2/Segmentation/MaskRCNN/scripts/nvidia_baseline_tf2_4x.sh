@@ -39,7 +39,7 @@ mkdir -p $BASEDIR/../results_tf2_4x
         --num_steps_per_eval=3696 \
         --first_eval=0 \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1800 \
+        --warmup_steps=500 \
         --global_gradient_clip_ratio=0.0 \
         --total_steps=320000 \
         --l2_weight_decay=1e-4 \
