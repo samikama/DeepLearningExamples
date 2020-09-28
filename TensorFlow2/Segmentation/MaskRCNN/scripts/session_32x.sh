@@ -16,11 +16,11 @@
 source activate tensorflow2_latest_p37
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../results_session_1x
-mkdir -p $BASEDIR/../results_session_1x
+rm -rf $BASEDIR/../results_session_32x
+mkdir -p $BASEDIR/../results_session_32x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    -np 8 -H localhost:8 \
+    --hostfile ~/hosts \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
@@ -31,16 +31,17 @@ mkdir -p $BASEDIR/../results_session_1x
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --log_interval=100 \
-        --init_learning_rate=0.01 \
-        --learning_rate_steps="118280,162635" \
+        --init_learning_rate=0.24 \
+        --learning_rate_steps="5625,7500" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../results_session_1x" \
-        --num_steps_per_eval=14785 \
+        --model_dir="$BASEDIR/../results_session_32x" \
+        --num_steps_per_eval=462 \
+        --first_eval=10 \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=500 \
-        --global_gradient_clip_ratio=0.0 \
-        --total_steps=192205 \
+        --warmup_steps=1800 \
+        --global_gradient_clip_ratio=5.0 \
+        --total_steps=8500 \
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
@@ -52,4 +53,4 @@ mkdir -p $BASEDIR/../results_session_1x
         --xla \
         --use_batched_nms \
         --disable_data_options \
-        --use_custom_box_proposals_op | tee $BASEDIR/../results_session_1x/results_session_1x.log
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_session_32x/results_session_32x.log

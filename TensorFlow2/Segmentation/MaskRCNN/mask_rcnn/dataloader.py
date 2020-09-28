@@ -52,7 +52,7 @@ class InputReader(object):
         use_fake_data=False,
         use_instance_mask=False,
         seed=None,
-        set_options=True
+        disable_options=False
     ):
 
         self._mode = mode
@@ -61,7 +61,7 @@ class InputReader(object):
         self._use_fake_data = use_fake_data
         self._use_instance_mask = use_instance_mask
         self._seed = seed
-        self._set_options = set_options
+        self._disable_options = disable_options
 
     def _create_dataset_parser_fn(self, params):
         """Create parser for parsing input data (dictionary)."""
@@ -192,7 +192,7 @@ class InputReader(object):
                         buffer_size=1,
                     )
                 )'''
-        if self._set_options:
+        if not self._disable_options:
             data_options = tf.data.Options()
 
             data_options.experimental_deterministic = seed is not None

@@ -135,7 +135,8 @@ def main(argv):
                 num_examples=None,
                 use_fake_data=RUN_CONFIG.use_fake_data,
                 use_instance_mask=RUN_CONFIG.include_mask,
-                seed=RUN_CONFIG.seed
+                seed=RUN_CONFIG.seed,
+                disable_options=RUN_CONFIG.disable_data_options
             )
 
     else:
@@ -149,7 +150,8 @@ def main(argv):
             num_examples=RUN_CONFIG.eval_samples,
             use_fake_data=False,
             use_instance_mask=RUN_CONFIG.include_mask,
-            seed=RUN_CONFIG.seed
+            seed=RUN_CONFIG.seed,
+            disable_options=RUN_CONFIG.disable_data_options
         )
 
     else:

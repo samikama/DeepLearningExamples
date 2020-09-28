@@ -93,6 +93,12 @@ def define_hparams_flags():
     )
     
     flags.DEFINE_bool(
+        'disable_data_options',
+        default=False,
+        help=('If set use static dataloader for training (precomputing anchors).')
+    )
+    
+    flags.DEFINE_bool(
         'tf2',
         default=False,
         help=('Run using TF2 Keras.model'
