@@ -201,7 +201,7 @@ class InputReader(object):
             else:
                 data_options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
             # data_options.experimental_distribute.auto_shard = False
-            data_options.experimental_slack = True
+            data_options.experimental_slack = params['data_slack']
 
             data_options.experimental_threading.max_intra_op_parallelism = 1
             # data_options.experimental_threading.private_threadpool_size = int(multiprocessing.cpu_count() / n_gpus) * 2

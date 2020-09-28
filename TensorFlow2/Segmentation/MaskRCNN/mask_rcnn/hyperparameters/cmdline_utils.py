@@ -95,7 +95,13 @@ def define_hparams_flags():
     flags.DEFINE_bool(
         'disable_data_options',
         default=False,
-        help=('If set use static dataloader for training (precomputing anchors).')
+        help=('Disable experimental data options.')
+    )
+    
+    flags.DEFINE_bool(
+        'data_slack',
+        default=False,
+        help=('Enable data prefetching slack.')
     )
     
     flags.DEFINE_bool(
