@@ -74,6 +74,9 @@ def run_eval(model, sess, steps, params):
     if MPI_rank() < 32:
         converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
         worker_source_ids = _preds['source_id']
+    else:
+        converted_predictions = []
+        worker_source_ids = []
     MPI.COMM_WORLD.barrier()
     predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
     source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
@@ -99,7 +102,7 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     assign_op, feed_dict = pretrained_restore_hook.assign_from_checkpoint(run_config.checkpoint, var_map)
     if MPI_rank()==0:
         hooks.extend([tf.compat.v1.train.CheckpointSaverHook(run_config.model_dir,
-                                        save_steps=run_config.num_steps_per_eval)])
+                                        save_steps=run_config.total_steps)])
     sess_config = model.get_session_config(use_xla=run_config.xla)
     session_creator=tf.compat.v1.train.ChiefSessionCreator(config=sess_config)
     sess = tf.compat.v1.train.MonitoredSession(session_creator=session_creator, hooks=hooks)
