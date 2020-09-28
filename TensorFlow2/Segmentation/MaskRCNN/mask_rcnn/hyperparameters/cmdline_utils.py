@@ -41,6 +41,8 @@ def define_hparams_flags():
     )
 
     flags.DEFINE_string('checkpoint', default='', help='Checkpoint filepath')
+    
+    flags.DEFINE_string('loop_mode', default='estimator', help='Mode to run training estimator, session, or tape.')
 
     flags.DEFINE_integer(
         'eval_batch_size',
@@ -82,6 +84,12 @@ def define_hparams_flags():
         default=False,
         help=('If set then distribute evaluation amongst all workers'
         )
+    )
+    
+    flags.DEFINE_bool(
+        'static_data',
+        default=False,
+        help=('If set use static dataloader for training (precomputing anchors).')
     )
     
     flags.DEFINE_bool(

@@ -51,7 +51,8 @@ class InputReader(object):
         num_examples=0,
         use_fake_data=False,
         use_instance_mask=False,
-        seed=None
+        seed=None,
+        set_options=True
     ):
 
         self._mode = mode
@@ -60,6 +61,7 @@ class InputReader(object):
         self._use_fake_data = use_fake_data
         self._use_instance_mask = use_instance_mask
         self._seed = seed
+        self._set_options = set_options
 
     def _create_dataset_parser_fn(self, params):
         """Create parser for parsing input data (dictionary)."""
@@ -182,55 +184,55 @@ class InputReader(object):
             buffer_size=tf.data.experimental.AUTOTUNE,
         )
 
-        if self._mode == tf.estimator.ModeKeys.PREDICT or n_gpus > 1:
+        '''if self._mode == tf.estimator.ModeKeys.PREDICT or n_gpus > 1:
             if not tf.distribute.has_strategy():
                 dataset = dataset.apply(
                     tf.data.experimental.prefetch_to_device(
                         '/gpu:0',  # With Horovod the local GPU is always 0
                         buffer_size=1,
                     )
-                )
+                )'''
+        if self._set_options:
+            data_options = tf.data.Options()
 
-        data_options = tf.data.Options()
+            data_options.experimental_deterministic = seed is not None
+            if LooseVersion(tf.__version__) <= LooseVersion("2.0.0"):
+                data_options.experimental_distribute.auto_shard = False
+            else:
+                data_options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
+            # data_options.experimental_distribute.auto_shard = False
+            data_options.experimental_slack = True
 
-        data_options.experimental_deterministic = seed is not None
-        if LooseVersion(tf.__version__) <= LooseVersion("2.0.0"):
-            data_options.experimental_distribute.auto_shard = False
-        else:
-            data_options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
-        # data_options.experimental_distribute.auto_shard = False
-        data_options.experimental_slack = True
+            data_options.experimental_threading.max_intra_op_parallelism = 1
+            # data_options.experimental_threading.private_threadpool_size = int(multiprocessing.cpu_count() / n_gpus) * 2
 
-        data_options.experimental_threading.max_intra_op_parallelism = 1
-        # data_options.experimental_threading.private_threadpool_size = int(multiprocessing.cpu_count() / n_gpus) * 2
+            # ================= experimental_optimization ================= #
 
-        # ================= experimental_optimization ================= #
+            data_options.experimental_optimization.apply_default_optimizations = False
 
-        data_options.experimental_optimization.apply_default_optimizations = False
+            # data_options.experimental_optimization.autotune = True
+            data_options.experimental_optimization.filter_fusion = True
+            data_options.experimental_optimization.map_and_batch_fusion = True
+            data_options.experimental_optimization.map_and_filter_fusion = True
+            data_options.experimental_optimization.map_fusion = True
+            data_options.experimental_optimization.map_parallelization = True
 
-        # data_options.experimental_optimization.autotune = True
-        data_options.experimental_optimization.filter_fusion = True
-        data_options.experimental_optimization.map_and_batch_fusion = True
-        data_options.experimental_optimization.map_and_filter_fusion = True
-        data_options.experimental_optimization.map_fusion = True
-        data_options.experimental_optimization.map_parallelization = True
+            map_vectorization_options = tf.data.experimental.MapVectorizationOptions()
+            map_vectorization_options.enabled = True
+            map_vectorization_options.use_choose_fastest = True
 
-        map_vectorization_options = tf.data.experimental.MapVectorizationOptions()
-        map_vectorization_options.enabled = True
-        map_vectorization_options.use_choose_fastest = True
+            data_options.experimental_optimization.map_vectorization = map_vectorization_options
 
-        data_options.experimental_optimization.map_vectorization = map_vectorization_options
+            data_options.experimental_optimization.noop_elimination = True
+            data_options.experimental_optimization.parallel_batch = True
+            data_options.experimental_optimization.shuffle_and_repeat_fusion = True
 
-        data_options.experimental_optimization.noop_elimination = True
-        data_options.experimental_optimization.parallel_batch = True
-        data_options.experimental_optimization.shuffle_and_repeat_fusion = True
+            # ========== Stats on TF Data =============
+            # aggregator = tf.data.experimental.StatsAggregator()
+            # data_options.experimental_stats.aggregator = aggregator
+            # data_options.experimental_stats.latency_all_edges = True
 
-        # ========== Stats on TF Data =============
-        # aggregator = tf.data.experimental.StatsAggregator()
-        # data_options.experimental_stats.aggregator = aggregator
-        # data_options.experimental_stats.latency_all_edges = True
-
-        dataset = dataset.with_options(data_options)
+            dataset = dataset.with_options(data_options)
 
         return dataset
 

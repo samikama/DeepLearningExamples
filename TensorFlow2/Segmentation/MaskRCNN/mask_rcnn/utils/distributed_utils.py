@@ -49,11 +49,11 @@ def MPI_local_rank():
 
 
 def MPI_rank():
-    return int(os.environ.get("OMPI_COMM_WORLD_RANK"))
+    return int(os.environ.get("OMPI_COMM_WORLD_RANK", 0))
 
 
 def MPI_size():
-    return int(os.environ.get("OMPI_COMM_WORLD_SIZE"))
+    return int(os.environ.get("OMPI_COMM_WORLD_SIZE", 1))
 
 
 def MPI_rank_and_size():

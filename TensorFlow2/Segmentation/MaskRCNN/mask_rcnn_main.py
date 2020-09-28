@@ -36,9 +36,11 @@ from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 
 from mask_rcnn import dataloader
+from mask_rcnn import static_data
 from mask_rcnn import distributed_executer
 from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
 from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
+from mask_rcnn import session_executor
 
 from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn.hyperparameters import params_io
@@ -74,7 +76,9 @@ def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
 
     else:
         raise ValueError('Mode must be one of `train`, `eval`, or `train_and_eval`')
-
+        
+def run_session(runtime_config, train_input_fn, eval_input_fn):
+    session_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
 
 def main(argv):
     del argv  # Unused.
@@ -92,6 +96,12 @@ def main(argv):
     temp_config['learning_rate_steps'] = [int(step) for step in temp_config['learning_rate_steps']]
 
     RUN_CONFIG = params_io.override_hparams(RUN_CONFIG, temp_config)
+    
+    if RUN_CONFIG.loop_mode in ['estimator', 'session']:
+        disable_eager_execution()
+    if RUN_CONFIG.loop_mode=='session':
+        tf.compat.v1.disable_v2_behavior()
+    
     # ============================ Configure parameters ============================ #
 
     if RUN_CONFIG.use_tf_distributed and MPI_is_distributed():
@@ -115,15 +125,19 @@ def main(argv):
                                                            filename=RUN_CONFIG.log_path)])
 
     if RUN_CONFIG.mode in ('train', 'train_and_eval'):
-
-        train_input_fn = dataloader.InputReader(
-            file_pattern=RUN_CONFIG.training_file_pattern,
-            mode=tf.estimator.ModeKeys.TRAIN,
-            num_examples=None,
-            use_fake_data=RUN_CONFIG.use_fake_data,
-            use_instance_mask=RUN_CONFIG.include_mask,
-            seed=RUN_CONFIG.seed
-        )
+        
+        if RUN_CONFIG.static_data:
+            train_input_fn = static_data.FastDataLoader(RUN_CONFIG.training_file_pattern, 
+                                                        RUN_CONFIG.values())
+        else:
+            train_input_fn = dataloader.InputReader(
+                file_pattern=RUN_CONFIG.training_file_pattern,
+                mode=tf.estimator.ModeKeys.TRAIN,
+                num_examples=None,
+                use_fake_data=RUN_CONFIG.use_fake_data,
+                use_instance_mask=RUN_CONFIG.include_mask,
+                seed=RUN_CONFIG.seed
+            )
 
     else:
         train_input_fn = None
@@ -132,7 +146,7 @@ def main(argv):
 
         eval_input_fn = dataloader.InputReader(
             file_pattern=RUN_CONFIG.validation_file_pattern,
-            mode=tf.estimator.ModeKeys.PREDICT,
+            mode=tf.estimator.ModeKeys.PREDICT if RUN_CONFIG.loop_mode=='estimator' else tf.estimator.ModeKeys.TRAIN,
             num_examples=RUN_CONFIG.eval_samples,
             use_fake_data=False,
             use_instance_mask=RUN_CONFIG.include_mask,
@@ -141,13 +155,16 @@ def main(argv):
 
     else:
         eval_input_fn = None
-
-    run_executer(RUN_CONFIG, train_input_fn, eval_input_fn)
+        
+    if RUN_CONFIG.loop_mode=='estimator':
+        run_executer(RUN_CONFIG, train_input_fn, eval_input_fn)
+    elif RUN_CONFIG.loop_mode=='session':
+        run_session(RUN_CONFIG, train_input_fn, eval_input_fn)
 
 
 if __name__ == '__main__':
     logging.set_verbosity(logging.INFO)
-    disable_eager_execution()
+    
     logging.set_verbosity(logging.DEBUG)
     tf.autograph.set_verbosity(0)
     log_cleaning(hide_deprecation_warnings=True)

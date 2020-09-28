@@ -24,9 +24,11 @@ procedure.
 """
 
 import itertools
+import multiprocessing
 
 import tensorflow as tf
 import tensorflow_addons as tfa
+from tensorflow.core.protobuf import rewriter_config_pb2
 from mask_rcnn import anchors
 
 from mask_rcnn.models import fpn
@@ -615,3 +617,166 @@ def mask_rcnn_model_fn(features, labels, mode, params):
         mode,
         params
     )
+
+class SessionModel(object):
+    
+    def __init__(self, run_config, train_input_fn=None, eval_input_fn=None, 
+                 is_training=True, **kwargs):
+        self.run_config = run_config
+        self.forward = MRCNN(run_config.values(), is_training=True, **kwargs)
+        self.train_tdf = train_input_fn(run_config.values()).make_initializable_iterator() \
+                            if train_input_fn else None
+        self.eval_tdf = eval_input_fn(run_config.values()).make_initializable_iterator() \
+                            if eval_input_fn else None
+        self.train_step = self.train_fn()
+        self.eval_step = self.eval_fn()
+        
+    def train_fn(self):
+        global_step = tf.compat.v1.train.get_or_create_global_step()
+        features, labels = self.train_tdf.get_next()
+        model_outputs = self.forward(features, labels, self.run_config.values(), True)
+        model_outputs.update({
+            'source_id': features['source_ids'],
+            'image_info': features['image_info'],
+        })
+        # score_loss and box_loss are for logging. only total_loss is optimized.
+        total_rpn_loss, rpn_score_loss, rpn_box_loss = losses.rpn_loss(
+            score_outputs=model_outputs['rpn_score_outputs'],
+            box_outputs=model_outputs['rpn_box_outputs'],
+            labels=labels,
+            params=self.run_config.values()
+        )
+        total_fast_rcnn_loss, fast_rcnn_class_loss, fast_rcnn_box_loss = losses.fast_rcnn_loss(
+            class_outputs=model_outputs['class_outputs'],
+            box_outputs=model_outputs['box_outputs'],
+            class_targets=model_outputs['class_targets'],
+            box_targets=model_outputs['box_targets'],
+            params=self.run_config.values()
+        )
+        if self.run_config.include_mask:
+            mask_loss = losses.mask_rcnn_loss(
+                mask_outputs=model_outputs['mask_outputs'],
+                mask_targets=model_outputs['mask_targets'],
+                select_class_targets=model_outputs['selected_class_targets'],
+                params=self.run_config.values()
+            )
+
+        else:
+            mask_loss = 0.
+        trainable_variables = self.forward.trainable_variables
+        if self.run_config.optimizer_type in ['LAMB', 'Novograd']: # decoupled weight decay
+            l2_regularization_loss = tf.constant(0.0)
+        else:
+            l2_regularization_loss = self.run_config.l2_weight_decay * tf.add_n([
+                tf.nn.l2_loss(v)
+                for v in trainable_variables
+                if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
+            ])
+        total_loss = total_rpn_loss + total_fast_rcnn_loss + mask_loss + l2_regularization_loss
+        
+        if self.run_config.lr_schedule == 'piecewise':
+            learning_rate = learning_rates.step_learning_rate_with_linear_warmup(
+                global_step=global_step,
+                init_learning_rate=self.run_config.init_learning_rate,
+                warmup_learning_rate=self.run_config.warmup_learning_rate,
+                warmup_steps=self.run_config.warmup_steps,
+                learning_rate_levels=self.run_config.learning_rate_levels,
+                learning_rate_steps=self.run_config.learning_rate_steps
+            )
+        elif self.run_config.lr_schedule == 'cosine':
+            learning_rate = learning_rates.cosine_learning_rate_with_linear_warmup(
+                global_step=global_step,
+                init_learning_rate=self.run_config.init_learning_rate,
+                warmup_learning_rate=self.run_config.warmup_learning_rate,
+                warmup_steps=self.run_config.warmup_steps,
+                first_decay_steps=self.run_config.total_steps,
+                alpha= 0.001 #* params['init_learning_rate']
+            )
+        else:
+            raise NotImplementedError
+
+        if self.run_config.optimizer_type == 'SGD':
+            optimizer = create_optimizer(learning_rate, self.run_config.values())
+        elif self.run_config.optimizer_type == 'LAMB':
+            optimizer = create_lamb_optimizer(learning_rate, self.run_config.values())
+        elif self.run_config.optimizer_type == 'Novograd':
+            optimizer = create_novograd_optimizer(learning_rate, self.run_config.values())
+        else:
+            raise NotImplementedError
+
+        grads_and_vars = optimizer.compute_gradients(total_loss, trainable_variables, colocate_gradients_with_ops=True)
+        
+        gradients, variables = zip(*grads_and_vars)
+        
+        global_gradient_clip_ratio = self.run_config.global_gradient_clip_ratio
+        if global_gradient_clip_ratio > 0.0:
+            all_are_finite = tf.reduce_all([tf.reduce_all(tf.math.is_finite(g)) for g in gradients])
+            (clipped_grads, _) = tf.clip_by_global_norm(gradients, clip_norm=global_gradient_clip_ratio,
+                                use_norm=tf.cond(all_are_finite, lambda: tf.linalg.global_norm(gradients), lambda: tf.constant(1.0)))
+            gradients = clipped_grads
+        
+        grads_and_vars = []
+
+        # Special treatment for biases (beta is named as bias in reference model)
+        # Reference: https://github.com/ddkang/Detectron/blob/80f3295308/lib/modeling/optimizer.py#L109
+        for grad, var in zip(gradients, variables):
+
+            if grad is not None and any([pattern in var.name for pattern in ["bias", "beta"]]):
+                grad = 2.0 * grad
+
+            grads_and_vars.append((grad, var))
+
+        train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
+        output_dict = {'train_op': train_op,
+                  'total_loss': total_loss,
+                  'total_rpn_loss': total_rpn_loss,
+                  'rpn_score_loss': rpn_score_loss,
+                  'rpn_box_loss': rpn_box_loss,
+                  'total_fast_rcnn_loss': total_fast_rcnn_loss,
+                  'fast_rcnn_class_loss': fast_rcnn_class_loss,
+                  'fast_rcnn_box_loss': fast_rcnn_box_loss, 
+                  'mask_loss': mask_loss,
+                  'l2_regularization_loss': l2_regularization_loss,
+                  'learning_rate': learning_rate}
+        return output_dict
+    
+    def eval_fn(self):
+        #with tf.xla.experimental.jit_scope(compile_ops=False):
+        features, labels = self.eval_tdf.get_next()
+        model_outputs = self.forward(features, labels, self.run_config.values(), False)
+        model_outputs.update({
+                'source_id': features['source_ids'],
+                'image_info': features['image_info'],
+            })
+        return model_outputs
+    
+    @staticmethod
+    def get_session_config(use_xla=True, use_amp=True, 
+                            use_tf_distributed=False, allow_xla_at_inference=False):
+        rewrite_options = rewriter_config_pb2.RewriterConfig(
+            meta_optimizer_iterations=rewriter_config_pb2.RewriterConfig.TWO)
+        if use_amp:
+            rewrite_options.auto_mixed_precision = True
+        config = tf.compat.v1.ConfigProto(
+            allow_soft_placement=True,
+            log_device_placement=False,
+            graph_options=tf.compat.v1.GraphOptions(
+                rewrite_options=rewrite_options,
+                # infer_shapes=True  # Heavily drops throughput by 30%
+            )
+        )
+        if use_tf_distributed:
+            config.gpu_options.force_gpu_compatible = False
+        else:
+            config.gpu_options.force_gpu_compatible = True
+            if MPI_is_distributed():
+                config.gpu_options.visible_device_list = str(MPI_local_rank())
+        if use_xla:
+            logging.info("XLA is activated - Experiment Feature")
+            config.graph_options.optimizer_options.global_jit_level = tf.compat.v1.OptimizerOptions.ON_1
+        config.intra_op_parallelism_threads = 1  # Avoid pool of Eigen threads
+        if MPI_is_distributed():
+            config.inter_op_parallelism_threads = max(2, multiprocessing.cpu_count() // hvd.local_size())
+        elif not use_tf_distributed:
+            config.inter_op_parallelism_threads = 4
+        return config

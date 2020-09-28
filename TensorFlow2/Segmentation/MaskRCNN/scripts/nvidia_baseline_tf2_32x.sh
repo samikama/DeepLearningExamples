@@ -38,8 +38,8 @@ mkdir -p $BASEDIR/../results_tf2_32x
         --first_eval=10 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1800 \
-        --global_gradient_clip_ratio=0.0 \
-        --total_steps=40000 \
+        --global_gradient_clip_ratio=5.0 \
+        --total_steps=8500 \
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
