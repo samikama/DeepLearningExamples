@@ -318,7 +318,9 @@ def prepare_labels_for_eval(
     """Create labels dict for infeed from data of tf.Example."""
     image = data['image']
 
-    height, width = tf.shape(input=image)[:2]
+    height = tf.shape(input=image)[0]
+    
+    width = tf.shape(input=image)[1]
 
     boxes = data['groundtruth_boxes']
 

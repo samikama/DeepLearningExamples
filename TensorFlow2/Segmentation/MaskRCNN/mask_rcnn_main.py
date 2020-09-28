@@ -36,7 +36,6 @@ from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 
 from mask_rcnn import dataloader
-from mask_rcnn import static_data
 from mask_rcnn import distributed_executer
 from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
 from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
@@ -146,7 +145,7 @@ def main(argv):
 
         eval_input_fn = dataloader.InputReader(
             file_pattern=RUN_CONFIG.validation_file_pattern,
-            mode=tf.estimator.ModeKeys.PREDICT if RUN_CONFIG.loop_mode=='estimator' else tf.estimator.ModeKeys.TRAIN,
+            mode=tf.estimator.ModeKeys.PREDICT,
             num_examples=RUN_CONFIG.eval_samples,
             use_fake_data=False,
             use_instance_mask=RUN_CONFIG.include_mask,

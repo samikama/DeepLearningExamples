@@ -742,7 +742,8 @@ class SessionModel(object):
     
     def eval_fn(self):
         #with tf.xla.experimental.jit_scope(compile_ops=False):
-        features, labels = self.eval_tdf.get_next()
+        features = self.eval_tdf.get_next()['features']
+        labels = None
         model_outputs = self.forward(features, labels, self.run_config.values(), False)
         model_outputs.update({
                 'source_id': features['source_ids'],

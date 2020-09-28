@@ -41,6 +41,7 @@ logical_devices = tf.config.list_logical_devices('GPU')
 def train_epoch(model, sess, steps):
     if MPI_rank()==0:
         p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+        logging.info("Starting training loop")
         loss_history = []
     else:
         p_bar = range(steps)
@@ -54,6 +55,7 @@ def train_epoch(model, sess, steps):
 def run_eval(model, sess, steps, params):
     if MPI_rank()==0:
         p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+        logging.info("Starting eval loop")
     else:
         p_bar = range(steps)
     worker_predictions = dict()
