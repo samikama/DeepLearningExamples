@@ -37,7 +37,7 @@ mkdir -p $BASEDIR/../results_session_32x
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../results_session_32x" \
         --num_steps_per_eval=462 \
-        --first_eval=10 \
+        --first_eval=15 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1800 \
         --global_gradient_clip_ratio=5.0 \
@@ -52,5 +52,4 @@ mkdir -p $BASEDIR/../results_session_32x
         --amp \
         --xla \
         --use_batched_nms \
-        --disable_data_options \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_session_32x/results_session_32x.log

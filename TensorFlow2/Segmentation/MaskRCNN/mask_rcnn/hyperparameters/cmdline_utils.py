@@ -110,6 +110,13 @@ def define_hparams_flags():
         help=('Run using TF2 Keras.model'
         )
     )
+    
+    flags.DEFINE_bool(
+        'async_eval',
+        default=False,
+        help=('asyn evaluation to run during next epoch.'
+        )
+    )
 
     # Gradient clipping is a fairly coarse heuristic to stabilize training.
     # This model clips the gradient by its L2 norm globally (i.e., across

@@ -52,7 +52,7 @@ def train_epoch(model, sess, steps):
             lr = model_output['learning_rate']
             p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), lr))
             
-def run_eval(model, sess, steps, params):
+def run_eval(model, sess, steps, params, async_eval=False):
     if MPI_rank()==0:
         p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         logging.info("Starting eval loop")
@@ -91,9 +91,11 @@ def run_eval(model, sess, steps, params):
             if i < 32:
                 source_ids.extend(s)
         args = [all_predictions, source_ids, True, validation_json_file]
-        eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, name="eval-thread", args=args)
-        eval_thread.start()
-        
+        if async_eval:
+            eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, name="eval-thread", args=args)
+            eval_thread.start()
+        else:
+            evaluation.compute_coco_eval_metric_n(*args)
 def train_and_eval(run_config, train_input_fn, eval_input_fn):
     total_epochs = ceil(run_config.total_steps/run_config.num_steps_per_eval)
     model = SessionModel(run_config, train_input_fn, eval_input_fn)
@@ -107,7 +109,6 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     session_creator=tf.compat.v1.train.ChiefSessionCreator(config=sess_config)
     sess = tf.compat.v1.train.MonitoredSession(session_creator=session_creator, hooks=hooks)
     sess.run(model.train_tdf.initializer)
-    sess.run(model.eval_tdf.initializer)
     sess.run(assign_op, feed_dict=feed_dict)
     eval_workers = min(MPI_size(), 32)
     for epoch in range(run_config.first_eval):
@@ -120,4 +121,5 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         train_epoch(model, sess, run_config.num_steps_per_eval)
         if MPI_rank()==0:
             logging.info("Running epoch {} evaluation".format(epoch+1))
-        run_eval(model, sess, run_config.eval_samples//eval_workers, run_config)
+        sess.run(model.eval_tdf.initializer)
+        run_eval(model, sess, run_config.eval_samples//eval_workers, run_config, async_eval=run_config.async_eval)

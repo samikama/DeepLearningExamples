@@ -51,5 +51,6 @@ mkdir -p $BASEDIR/../results_tf2_32x
         --use_batched_nms \
         --xla \
         --tf2 \
+        --async_eval \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_32x/results_tf2_32x.log
 
