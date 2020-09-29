@@ -52,5 +52,7 @@ mkdir -p $BASEDIR/../results_2x
         --amp \
         --use_batched_nms \
         --xla \
+        --data_slack \
+        --async_eval \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_2x/run_2x.log
 

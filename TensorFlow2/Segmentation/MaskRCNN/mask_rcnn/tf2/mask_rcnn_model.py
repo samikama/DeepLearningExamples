@@ -24,7 +24,13 @@ procedure.
 """
 
 import itertools
+import copy
+import numpy as np
 import multiprocessing
+from statistics import mean
+import threading
+from math import ceil
+from mpi4py import MPI
 
 import tensorflow as tf
 import tensorflow_addons as tfa
@@ -45,8 +51,8 @@ from mask_rcnn.ops import training_ops
 
 from mask_rcnn.utils.logging_formatter import logging
 
-from mask_rcnn.utils.distributed_utils import MPI_is_distributed
-from mask_rcnn.utils.distributed_utils import MPI_local_rank
+from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_local_rank, MPI_rank
+from mask_rcnn import evaluation, coco_metric
 
 from mask_rcnn.utils.meters import StandardMeter
 from mask_rcnn.utils.metric_tracking import register_metric
@@ -781,3 +787,181 @@ class SessionModel(object):
         elif not use_tf_distributed:
             config.inter_op_parallelism_threads = 4
         return config
+    
+class TapeModel(object):
+    
+    def __init__(self, params, train_input_fn=None, eval_input_fn=None, is_training=True):
+        self.params = params
+        self.forward = MRCNN(self.params.values(), is_training=is_training)
+        self.train_tdf = iter(train_input_fn(self.params.values())) \
+                            if train_input_fn else None
+        self.eval_tdf = iter(eval_input_fn(self.params.values())) \
+                            if eval_input_fn else None
+        self.optimizer, self.schedule = self.get_optimizer()
+    
+    def load_weights(self):
+        chkp = tf.compat.v1.train.NewCheckpointReader(self.params.checkpoint)
+        weights = [chkp.get_tensor(i) for i in eager_mapping.resnet_vars]
+        self.forward.layers[0].set_weights(weights)
+        
+    def get_optimizer(self):
+        if self.params.lr_schedule=='piecewise':
+            schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(self.params.learning_rate_steps,
+                                                                            [self.params.init_learning_rate] + \
+                                                                            self.params.learning_rate_levels)
+        else:
+            raise NotImplementedError
+        schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
+                                                    self.params.warmup_steps)
+        if self.params.optimizer_type=="SGD":
+            opt = tf.keras.optimizers.SGD(learning_rate=schedule, 
+                                          momentum=self.params.momentum)
+        elif self.params.optimizer_type=="LAMB":
+            opt = tfa.optimizers.LAMB(learning_rate=schedule)
+        elif self.params.optimizer_type=="Novograd":
+            opt = tfa.optimizers.NovoGrad(learning_rate=schedule)
+        else:
+            raise NotImplementedError
+        if self.params.amp:
+            opt = tf.keras.mixed_precision.experimental.LossScaleOptimizer(opt, 'dynamic')
+        return opt, schedule
+    
+    @tf.function
+    def train_step(self, features, labels, sync_weights=False, sync_opt=False):
+        loss_dict = dict()
+        with tf.GradientTape() as tape:
+            model_outputs = self.forward(features, labels, self.params.values(), True)
+            loss_dict['total_rpn_loss'], loss_dict['rpn_score_loss'], \
+                loss_dict['rpn_box_loss'] = losses.rpn_loss(
+                score_outputs=model_outputs['rpn_score_outputs'],
+                box_outputs=model_outputs['rpn_box_outputs'],
+                labels=labels,
+                params=self.params.values()
+            )
+            loss_dict['total_fast_rcnn_loss'], loss_dict['fast_rcnn_class_loss'], \
+                loss_dict['fast_rcnn_box_loss'] = losses.fast_rcnn_loss(
+                class_outputs=model_outputs['class_outputs'],
+                box_outputs=model_outputs['box_outputs'],
+                class_targets=model_outputs['class_targets'],
+                box_targets=model_outputs['box_targets'],
+                params=self.params.values()
+            )
+            if self.params.include_mask:
+                loss_dict['mask_loss'] = losses.mask_rcnn_loss(
+                    mask_outputs=model_outputs['mask_outputs'],
+                    mask_targets=model_outputs['mask_targets'],
+                    select_class_targets=model_outputs['selected_class_targets'],
+                    params=self.params.values()
+                )
+            else:
+                loss_dict['mask_loss'] = 0.
+            if self.params.optimizer_type in ['LAMB', 'Novograd']: # decoupled weight decay
+                loss_dict['l2_regularization_loss'] = tf.constant(0.0)
+            else:
+                loss_dict['l2_regularization_loss'] = self.params.l2_weight_decay * tf.add_n([
+                    tf.nn.l2_loss(v)
+                    for v in self.forward.trainable_variables
+                    if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
+                ])
+            loss_dict['total_loss'] = loss_dict['total_rpn_loss'] \
+                + loss_dict['total_fast_rcnn_loss'] + loss_dict['mask_loss'] \
+                + loss_dict['l2_regularization_loss']
+            if self.params.amp:
+                scaled_loss = self.optimizer.get_scaled_loss(loss_dict['total_loss'])
+        if MPI_is_distributed():
+            tape = hvd.DistributedGradientTape(tape, compression=hvd.compression.FP16Compressor)
+        if self.params.amp:
+            scaled_gradients = tape.gradient(scaled_loss, self.forward.trainable_variables)
+            gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
+        else:
+            gradients = tape.gradient(loss_dict['total_loss'], self.forward.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
+        if MPI_is_distributed() and sync_weights:
+            hvd.broadcast_variables(self.forward.variables, 0)
+        if MPI_is_distributed() and sync_weights:
+            hvd.broadcast_variables(self.optimizer.variables(), 0)
+        return loss_dict
+    
+    def initialize_training(self):
+        features, labels = next(mrcnn_model.train_tdf)
+        model_outputs = self.forward(features, labels, self.params.values(), True)
+        self.load_weights()
+    
+    def train_epoch(self, steps, broadcast=False):
+        if MPI_rank()==0:
+            logging.info("Starting training loop")
+            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+            loss_history = []
+        else:
+            p_bar = range(steps)
+        for i in p_bar:
+            if broadcast:
+                b_w, b_o = True, True
+            elif i==0:
+                b_w, b_o = False, True
+            else:
+                b_w, b_o = False, False
+            features, labels = next(self.train_tdf)
+            loss_dict = self.train_step(features, labels, b_w, b_o)
+            if MPI_rank()==0:
+                loss_history.append(loss_dict['total_loss'].numpy())
+                step = self.optimizer.iterations
+                learning_rate = self.schedule(step)
+                p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                          learning_rate))
+    @tf.function            
+    def predict(self, features):
+        labels = None
+        model_outputs = self.forward(features, labels, self.params.values(), False)
+        model_outputs.update({
+                'source_id': features['source_ids'],
+                'image_info': features['image_info'],
+            })
+        return model_outputs
+            
+    def run_eval(self, steps, async_eval=False):
+        if MPI_rank()==0:
+            logging.info("Starting eval loop")
+            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+        else:
+            p_bar = range(steps)
+        worker_predictions = dict()
+        for i in p_bar:
+            features = next(self.eval_tdf)['features']
+            out = self.predict(features)
+            out = evaluation.process_prediction_for_eval(out)
+            for k, v in out.items():
+                if k not in worker_predictions:
+                    worker_predictions[k] = [v]
+                else:
+                    worker_predictions[k].append(v)
+        coco = coco_metric.MaskCOCO()
+        _preds = copy.deepcopy(worker_predictions)
+        for k, v in _preds.items():
+            _preds[k] = np.concatenate(v, axis=0)
+        if MPI_rank() < 32:
+            converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+            worker_source_ids = _preds['source_id']
+        else:
+            converted_predictions = []
+            worker_source_ids = []
+        MPI.COMM_WORLD.barrier()
+        predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
+        source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
+        validation_json_file=self.params.val_json_file
+        if MPI_rank() == 0:
+            all_predictions = []
+            source_ids = []
+            for i, p in enumerate(predictions_list):
+                if i < 32:
+                    all_predictions.extend(p)
+            for i, s in enumerate(source_ids_list):
+                if i < 32:
+                    source_ids.extend(s)
+            args = [all_predictions, source_ids, True, validation_json_file]
+            if async_eval:
+                eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
+                                               name="eval-thread", args=args)
+                eval_thread.start()
+            else:
+                evaluation.compute_coco_eval_metric_n(*args)
