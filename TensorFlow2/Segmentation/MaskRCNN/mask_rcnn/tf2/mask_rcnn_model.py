@@ -31,6 +31,7 @@ from statistics import mean
 import threading
 from math import ceil
 from mpi4py import MPI
+from tqdm import tqdm
 
 import tensorflow as tf
 import tensorflow_addons as tfa
@@ -59,6 +60,8 @@ from mask_rcnn.utils.metric_tracking import register_metric
 
 from mask_rcnn.utils.lazy_imports import LazyImport
 from mask_rcnn.training.optimization import LambOptimizer, NovoGrad
+from mask_rcnn.tf2.utils import warmup_scheduler, eager_mapping
+
 hvd = LazyImport("horovod.tensorflow")
 
 MODELS = dict()
@@ -869,7 +872,7 @@ class TapeModel(object):
             if self.params.amp:
                 scaled_loss = self.optimizer.get_scaled_loss(loss_dict['total_loss'])
         if MPI_is_distributed():
-            tape = hvd.DistributedGradientTape(tape, compression=hvd.compression.FP16Compressor)
+            tape = hvd.DistributedGradientTape(tape, compression=hvd.compression.NoneCompressor)
         if self.params.amp:
             scaled_gradients = tape.gradient(scaled_loss, self.forward.trainable_variables)
             gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
@@ -877,13 +880,17 @@ class TapeModel(object):
             gradients = tape.gradient(loss_dict['total_loss'], self.forward.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
         if MPI_is_distributed() and sync_weights:
+            if MPI_rank()==0:
+                logging.info("Broadcasting variables")
             hvd.broadcast_variables(self.forward.variables, 0)
-        if MPI_is_distributed() and sync_weights:
+        if MPI_is_distributed() and sync_opt:
+            if MPI_rank()==0:
+                logging.info("Broadcasting optimizer")
             hvd.broadcast_variables(self.optimizer.variables(), 0)
         return loss_dict
     
-    def initialize_training(self):
-        features, labels = next(mrcnn_model.train_tdf)
+    def initialize_model(self):
+        features, labels = next(self.train_tdf)
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
     
@@ -895,7 +902,7 @@ class TapeModel(object):
         else:
             p_bar = range(steps)
         for i in p_bar:
-            if broadcast:
+            if broadcast and i==0:
                 b_w, b_o = True, True
             elif i==0:
                 b_w, b_o = False, True
@@ -919,7 +926,7 @@ class TapeModel(object):
             })
         return model_outputs
             
-    def run_eval(self, steps, async_eval=False):
+    def run_eval(self, steps, async_eval=False, use_ext=False):
         if MPI_rank()==0:
             logging.info("Starting eval loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
@@ -958,10 +965,19 @@ class TapeModel(object):
             for i, s in enumerate(source_ids_list):
                 if i < 32:
                     source_ids.extend(s)
-            args = [all_predictions, source_ids, True, validation_json_file]
-            if async_eval:
-                eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
-                                               name="eval-thread", args=args)
-                eval_thread.start()
+            if use_ext:
+                args = [all_predictions, validation_json_file]
+                if async_eval:
+                    eval_thread = threading.Thread(target=evaluation.fast_eval,
+                                                   name="eval-thread", args=args)
+                    eval_thread.start()
+                else:
+                    evaluation.fast_eval(*args)
             else:
-                evaluation.compute_coco_eval_metric_n(*args)
+                args = [all_predictions, source_ids, True, validation_json_file]
+                if async_eval:
+                    eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
+                                                   name="eval-thread", args=args)
+                    eval_thread.start()
+                else:
+                    evaluation.compute_coco_eval_metric_n(*args)

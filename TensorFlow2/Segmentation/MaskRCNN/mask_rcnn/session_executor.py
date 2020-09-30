@@ -52,7 +52,7 @@ def train_epoch(model, sess, steps):
             lr = model_output['learning_rate']
             p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), lr))
             
-def run_eval(model, sess, steps, params, async_eval=False):
+def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
     if MPI_rank()==0:
         p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         logging.info("Starting eval loop")
@@ -90,12 +90,22 @@ def run_eval(model, sess, steps, params, async_eval=False):
         for i, s in enumerate(source_ids_list):
             if i < 32:
                 source_ids.extend(s)
-        args = [all_predictions, source_ids, True, validation_json_file]
-        if async_eval:
-            eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, name="eval-thread", args=args)
-            eval_thread.start()
+        if use_ext:
+            args = [all_predictions, validation_json_file]
+            if async_eval:
+                eval_thread = threading.Thread(target=evaluation.fast_eval,
+                                                   name="eval-thread", args=args)
+                eval_thread.start()
+            else:
+                evaluation.fast_eval(*args)
         else:
-            evaluation.compute_coco_eval_metric_n(*args)
+            args = [all_predictions, source_ids, True, validation_json_file]
+            if async_eval:
+                eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, name="eval-thread", args=args)
+                eval_thread.start()
+            else:
+                evaluation.compute_coco_eval_metric_n(*args)
+
 def train_and_eval(run_config, train_input_fn, eval_input_fn):
     total_epochs = ceil(run_config.total_steps/run_config.num_steps_per_eval)
     model = SessionModel(run_config, train_input_fn, eval_input_fn)
@@ -122,4 +132,5 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         if MPI_rank()==0:
             logging.info("Running epoch {} evaluation".format(epoch+1))
         sess.run(model.eval_tdf.initializer)
-        run_eval(model, sess, run_config.eval_samples//eval_workers, run_config, async_eval=run_config.async_eval)
+        run_eval(model, sess, run_config.eval_samples//eval_workers, run_config, 
+                 async_eval=run_config.async_eval, use_ext=run_config.use_ext)
