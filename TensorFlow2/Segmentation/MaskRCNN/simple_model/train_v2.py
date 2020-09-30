@@ -8,6 +8,7 @@ import itertools
 from statistics import mean
 import time
 from tqdm import tqdm
+import pdb
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 sys.path.append('..')
@@ -15,7 +16,7 @@ sys.path.append('..')
 os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
 os.environ["TF_GPU_THREAD_COUNT"] = "1"
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
-os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
+#os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
 #os.environ["TF_CPP_VMODULE"] = 'roi_align_op=2'
 do_profile=False
 
@@ -26,7 +27,11 @@ os.environ['TF_ADJUST_HUE_FUSED'] = '1'
 os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
 os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
+#pdb.set_trace()
 import tensorflow as tf
+
+tf.config.force_gpu_compatible(True)
+
 from tensorflow.python.profiler import profiler_v2 as tf_profiler
 from tensorflow.python.profiler.trace import Trace as prof_Trace
 
@@ -36,6 +41,7 @@ from tensorflow.keras.mixed_precision import experimental as mixed_precision
 
 import horovod.tensorflow as hvd
 hvd.init()
+
 physical_devices = tf.config.list_physical_devices('GPU')
 # tf.config.experimental.set_memory_growth(physical_devices[hvd.rank()], True)
 #tf.config.set_visible_devices(physical_devices[hvd.rank()], 'GPU')
@@ -185,7 +191,7 @@ if hvd.rank() == 0:
 else:
   p_bar = range(steps)
 run_loop(p_bar)
-steps=4000
+steps=400
 p_bar=tqdm(range(steps))
 loss_history = []
 rpn_loss_history = []
