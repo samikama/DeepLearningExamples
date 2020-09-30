@@ -35,17 +35,17 @@ def nearest_upsampling(data, scale):
       data.
   """
   with tf.name_scope('nearest_upsampling'):
-      bs, h, w, c = tf.unstack(tf.shape(data))
+    bs, h, w, c = tf.unstack(tf.shape(data))
 
-      # Use reshape to quickly upsample the input.
-      # The nearest pixel is selected implicitly via broadcasting.
-      # data = tf.reshape(data, [bs, h, 1, w, 1, c]) * tf.ones([1, 1, scale, 1, scale, 1], dtype=data.dtype)
+    # Use reshape to quickly upsample the input.
+    # The nearest pixel is selected implicitly via broadcasting.
+    # data = tf.reshape(data, [bs, h, 1, w, 1, c]) * tf.ones([1, 1, scale, 1, scale, 1], dtype=data.dtype)
 
-      # Instead of broadcasting with a 6-d tensor, we're using stacking here
-      # for TfLite compatibity.
-      output = tf.stack([data] * scale, axis=3)
-      output = tf.stack([output] * scale, axis=2)
-      return tf.reshape(output, [bs, h * scale, w * scale, c])
+    # Instead of broadcasting with a 6-d tensor, we're using stacking here
+    # for TfLite compatibity.
+    output = tf.stack([data] * scale, axis=3)
+    output = tf.stack([output] * scale, axis=2)
+    return tf.reshape(output, [bs, h * scale, w * scale, c])
 
   return tf.reshape(data, [bs, h * scale, w * scale, c])
 
@@ -156,51 +156,49 @@ def selective_crop_and_resize(features,
   level_dim_offset = max_feature_height * height_dim_offset
   batch_dim_offset = num_levels * level_dim_offset
 
-  batch_dim_indices = (
-      tf.reshape(tf.range(batch_size, dtype=indices_dtype) * batch_dim_offset, [batch_size, 1, 1, 1]) *
-      tf.ones([1, num_boxes, output_size * 2, output_size * 2], dtype=indices_dtype)
-  )
+  batch_dim_indices = (tf.reshape(
+      tf.range(batch_size, dtype=indices_dtype) * batch_dim_offset,
+      [batch_size, 1, 1, 1]) *
+                       tf.ones([1, num_boxes, output_size * 2, output_size * 2],
+                               dtype=indices_dtype))
 
   box_level_indices = (
       tf.reshape(box_levels * level_dim_offset, [batch_size, num_boxes, 1, 1]) *
-      tf.ones([1, 1, output_size * 2, output_size * 2], dtype=indices_dtype)
-  )
+      tf.ones([1, 1, output_size * 2, output_size * 2], dtype=indices_dtype))
 
-  height_indices = (
-      tf.reshape(y_indices * height_dim_offset, [batch_size, num_boxes, output_size * 2, 1]) *
-      tf.ones([1, 1, 1, output_size * 2], dtype=indices_dtype)
-  )
+  height_indices = (tf.reshape(y_indices * height_dim_offset,
+                               [batch_size, num_boxes, output_size * 2, 1]) *
+                    tf.ones([1, 1, 1, output_size * 2], dtype=indices_dtype))
 
   width_indices = (
       tf.reshape(x_indices, [batch_size, num_boxes, 1, output_size * 2]) *
-      tf.ones([1, 1, output_size * 2, 1], dtype=indices_dtype)
-  )
+      tf.ones([1, 1, output_size * 2, 1], dtype=indices_dtype))
 
   # TODO(hongjunchoi): Remove the need for temporary variables as
   # temporary variables with
 
   if True:
-      batch_dim_indices = tf.cast(batch_dim_indices, tf.float32)
-      box_level_indices = tf.cast(box_level_indices, tf.float32)
-      height_indices = tf.cast(height_indices, tf.float32)
-      width_indices = tf.cast(width_indices, tf.float32)
+    batch_dim_indices = tf.cast(batch_dim_indices, tf.float32)
+    box_level_indices = tf.cast(box_level_indices, tf.float32)
+    height_indices = tf.cast(height_indices, tf.float32)
+    width_indices = tf.cast(width_indices, tf.float32)
 
-      indices = tf.add_n([
-          batch_dim_indices,
-          box_level_indices,
-          height_indices,
-          width_indices,
-      ])
+    indices = tf.add_n([
+        batch_dim_indices,
+        box_level_indices,
+        height_indices,
+        width_indices,
+    ])
 
-      indices = tf.cast(indices, tf.int32)
+    indices = tf.cast(indices, tf.int32)
 
   else:  # TODO: Restore this API int32 dtype will be supported on GPUs.
-      indices = tf.add_n([
-          batch_dim_indices,
-          box_level_indices,
-          height_indices,
-          width_indices,
-      ])
+    indices = tf.add_n([
+        batch_dim_indices,
+        box_level_indices,
+        height_indices,
+        width_indices,
+    ])
 
   if batch_size == 1:
     # Special handling for single batch input to make it friendly for GPU
@@ -226,8 +224,7 @@ def selective_crop_and_resize(features,
 
   features_per_box = tf.reshape(
       features_per_box,
-      [batch_size, num_boxes, output_size * 2, output_size * 2, num_filters]
-  )
+      [batch_size, num_boxes, output_size * 2, output_size * 2, num_filters])
 
   # The RoIAlign feature f can be computed by bilinear interpolation of four
   # neighboring feature points f0, f1, f2, and f3.
@@ -239,23 +236,108 @@ def selective_crop_and_resize(features,
   lx = box_grid_x - box_grid_x0
   hy = 1.0 - ly
   hx = 1.0 - lx
-  kernel_x = tf.reshape(tf.stack([hx, lx], axis=3), [batch_size, num_boxes, 1, output_size * 2])
-  kernel_y = tf.reshape(tf.stack([hy, ly], axis=3), [batch_size, num_boxes, output_size * 2, 1])
+  kernel_x = tf.reshape(tf.stack([hx, lx], axis=3),
+                        [batch_size, num_boxes, 1, output_size * 2])
+  kernel_y = tf.reshape(tf.stack([hy, ly], axis=3),
+                        [batch_size, num_boxes, output_size * 2, 1])
 
   # Use implicit broadcast to generate the interpolation kernel. The
   # multiplier `4` is for avg pooling.
   interpolation_kernel = kernel_y * kernel_x * 4
 
   # Interpolate the gathered features with computed interpolation kernels.
-  features_per_box *= tf.cast(tf.expand_dims(interpolation_kernel, axis=4), dtype=features_per_box.dtype)
+  features_per_box *= tf.cast(tf.expand_dims(interpolation_kernel, axis=4),
+                              dtype=features_per_box.dtype)
   features_per_box = tf.reshape(
       features_per_box,
-      [batch_size * num_boxes, output_size * 2, output_size * 2, num_filters]
-  )
-  features_per_box = tf.nn.avg_pool2d(features_per_box, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
-  features_per_box = tf.reshape(features_per_box, [batch_size, num_boxes, output_size, output_size, num_filters])
+      [batch_size * num_boxes, output_size * 2, output_size * 2, num_filters])
+  features_per_box = tf.nn.avg_pool2d(features_per_box,
+                                      ksize=[1, 2, 2, 1],
+                                      strides=[1, 2, 2, 1],
+                                      padding='VALID')
+  features_per_box = tf.reshape(
+      features_per_box,
+      [batch_size, num_boxes, output_size, output_size, num_filters])
 
   return features_per_box
+
+
+def custom_multilevel_crop_and_resize(features,
+                                      boxes,
+                                      output_size=7,
+                                      is_gpu_inference="ignored",
+                                      is_transposed=True):
+  """Crop and resize on multilevel feature pyramid.
+
+  Generate the (output_size, output_size) set of pixels for each input box
+  by first locating the box into the correct feature level, and then cropping
+  and resizing it using the correspoding feature map of that level.
+
+  Args:
+    features: A dictionary with key as pyramid level and value as features. The
+      features are in shape of [batch_size, height_l, width_l, num_filters].
+    boxes: A 3-D Tensor of shape [batch_size, num_boxes, 4]. Each row represents
+      a box with [y1, x1, y2, x2] in un-normalized coordinates.
+    output_size: A scalar to indicate the output crop size.
+    is_gpu_inference: whether to build the model for GPU inference.
+
+  Returns:
+    A 5-D tensor representing feature crop of shape
+    [batch_size, num_boxes, output_size, output_size, num_filters].
+  """
+  with tf.name_scope('custom_multilevel_crop_and_resize'):
+    levels = features.keys()
+    min_level = min(levels)
+    max_level = max(levels)
+    _, max_feature_height, max_feature_width, _ = (
+        features[min_level].get_shape().as_list())
+
+    # Stack feature pyramid into a features_all of shape
+    # [batch_size, levels, height, width, num_filters].
+    features_all = []
+    for level in range(min_level, max_level + 1):
+      features_all.append(
+          tf.image.pad_to_bounding_box(features[level], 0, 0,
+                                       max_feature_height, max_feature_width))
+
+    features_all = tf.stack(features_all, axis=1)
+    if is_transposed:
+      inp = tf.transpose(features_all, [0, 1, 4, 2, 3])
+    else:
+      inp=features_all
+    rois = boxes
+    spatial_scale = tf.constant(1.0)
+    min_level_tensor = tf.constant(min_level)
+    max_level_tensor = tf.constant(max_level)
+    canonical_scale = tf.constant(224.0)
+    canonical_level = tf.constant(4)
+    #need [batch_size, num_levels, num_filters, max_height, max_width]
+    # TODO(sami) add b,l,h,w,c kernel
+    if is_transposed:
+      return tf.transpose(
+          tf.image.roi_align(input=inp,
+                             rois=rois,
+                             pooled_height=output_size,
+                             pooled_width=output_size,
+                             sampling_ratio=tf.constant(1),
+                             spatial_scale=spatial_scale,
+                             min_level=min_level_tensor,
+                             max_level=max_level_tensor,
+                             canonical_scale=canonical_scale,
+                             canonical_level=canonical_level,
+                             data_format="NCHW"), [0, 1, 3, 4, 2])
+    else:
+      return tf.image.roi_align(input=inp,
+                                rois=rois,
+                                pooled_height=output_size,
+                                pooled_width=output_size,
+                                sampling_ratio=tf.constant(1),
+                                spatial_scale=spatial_scale,
+                                min_level=min_level_tensor,
+                                max_level=max_level_tensor,
+                                canonical_scale=canonical_scale,
+                                canonical_level=canonical_level,
+                                data_format="NHWC")
 
 
 def multilevel_crop_and_resize(features,
@@ -281,68 +363,73 @@ def multilevel_crop_and_resize(features,
     [batch_size, num_boxes, output_size, output_size, num_filters].
   """
   with tf.name_scope('multilevel_crop_and_resize'):
-      levels = features.keys()
-      min_level = min(levels)
-      max_level = max(levels)
-      _, max_feature_height, max_feature_width, _ = (
-          features[min_level].get_shape().as_list())
+    levels = features.keys()
+    min_level = min(levels)
+    max_level = max(levels)
+    _, max_feature_height, max_feature_width, _ = (
+        features[min_level].get_shape().as_list())
 
-      # Stack feature pyramid into a features_all of shape
-      # [batch_size, levels, height, width, num_filters].
-      features_all = []
-      for level in range(min_level, max_level + 1):
-        features_all.append(tf.image.pad_to_bounding_box(features[level], 0, 0, max_feature_height, max_feature_width))
+    # Stack feature pyramid into a features_all of shape
+    # [batch_size, levels, height, width, num_filters].
+    features_all = []
+    for level in range(min_level, max_level + 1):
+      features_all.append(
+          tf.image.pad_to_bounding_box(features[level], 0, 0,
+                                       max_feature_height, max_feature_width))
 
-      features_all = tf.stack(features_all, axis=1)
+    features_all = tf.stack(features_all, axis=1)
 
-      # Assign boxes to the right level.
-      box_width = tf.squeeze(boxes[:, :, 3:4] - boxes[:, :, 1:2], axis=-1)
-      box_height = tf.squeeze(boxes[:, :, 2:3] - boxes[:, :, 0:1], axis=-1)
+    # Assign boxes to the right level.
+    box_width = tf.squeeze(boxes[:, :, 3:4] - boxes[:, :, 1:2], axis=-1)
+    box_height = tf.squeeze(boxes[:, :, 2:3] - boxes[:, :, 0:1], axis=-1)
 
-      areas_sqrt = tf.sqrt(box_height * box_width)
+    areas_sqrt = tf.sqrt(box_height * box_width)
 
-      levels = tf.math.floordiv(tf.math.log(tf.divide(areas_sqrt, 224.0)), tf.math.log(2.0)) + 4.0
+    levels = tf.math.floordiv(tf.math.log(tf.divide(areas_sqrt, 224.0)),
+                              tf.math.log(2.0)) + 4.0
 
-      if not is_gpu_inference:
-        levels = tf.cast(levels, dtype=tf.int32)
+    if not is_gpu_inference:
+      levels = tf.cast(levels, dtype=tf.int32)
 
-      # Map levels between [min_level, max_level].
-      levels = tf.minimum(
-          float(max_level) if is_gpu_inference else max_level,
-          tf.maximum(levels, float(min_level) if is_gpu_inference else min_level)
-      )
+    # Map levels between [min_level, max_level].
+    levels = tf.minimum(
+        float(max_level) if is_gpu_inference else max_level,
+        tf.maximum(levels,
+                   float(min_level) if is_gpu_inference else min_level))
 
-      # Project box location and sizes to corresponding feature levels.
-      scale_to_level = tf.cast(
-          tf.pow(tf.constant(2.0), levels if is_gpu_inference else tf.cast(levels, tf.float32)),
-          dtype=boxes.dtype
-      )
+    # Project box location and sizes to corresponding feature levels.
+    scale_to_level = tf.cast(tf.pow(
+        tf.constant(2.0),
+        levels if is_gpu_inference else tf.cast(levels, tf.float32)),
+                             dtype=boxes.dtype)
 
-      boxes /= tf.expand_dims(scale_to_level, axis=2)
+    boxes /= tf.expand_dims(scale_to_level, axis=2)
 
-      box_width /= scale_to_level
-      box_height /= scale_to_level
+    box_width /= scale_to_level
+    box_height /= scale_to_level
 
-      boxes = tf.concat(
-          [boxes[:, :, 0:2],
-          tf.expand_dims(box_height, -1),
-          tf.expand_dims(box_width, -1)],
-          axis=-1
-      )
+    boxes = tf.concat([
+        boxes[:, :, 0:2],
+        tf.expand_dims(box_height, -1),
+        tf.expand_dims(box_width, -1)
+    ],
+                      axis=-1)
 
-      # Map levels to [0, max_level-min_level].
-      levels -= min_level
-      level_strides = tf.pow([[2.0]], levels if is_gpu_inference else tf.cast(levels, tf.float32))
+    # Map levels to [0, max_level-min_level].
+    levels -= min_level
+    level_strides = tf.pow(
+        [[2.0]], levels if is_gpu_inference else tf.cast(levels, tf.float32))
 
-      boundary = tf.cast(
-          tf.concat(
-              [
-                  tf.expand_dims([[tf.cast(max_feature_height, tf.float32)]] / level_strides - 1, axis=-1),
-                  tf.expand_dims([[tf.cast(max_feature_width, tf.float32)]] / level_strides - 1, axis=-1),
-              ],
-              axis=-1
-          ),
-          boxes.dtype
-      )
+    boundary = tf.cast(
+        tf.concat([
+            tf.expand_dims(
+                [[tf.cast(max_feature_height, tf.float32)]] / level_strides - 1,
+                axis=-1),
+            tf.expand_dims(
+                [[tf.cast(max_feature_width, tf.float32)]] / level_strides - 1,
+                axis=-1),
+        ],
+                  axis=-1), boxes.dtype)
 
-  return selective_crop_and_resize(features_all, boxes, levels, boundary, output_size, is_gpu_inference)
+  return selective_crop_and_resize(features_all, boxes, levels, boundary,
+                                   output_size, is_gpu_inference)
