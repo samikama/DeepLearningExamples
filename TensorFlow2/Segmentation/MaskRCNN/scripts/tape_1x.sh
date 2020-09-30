@@ -51,7 +51,6 @@ mkdir -p $BASEDIR/../results_tape_1x
         --amp \
         --xla \
         --use_batched_nms \
-        --disable_data_options \
         --async_eval \
         --use_ext \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_tape_1x/results_tape_1x.log

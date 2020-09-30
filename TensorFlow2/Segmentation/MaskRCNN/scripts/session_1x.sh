@@ -39,6 +39,7 @@ mkdir -p $BASEDIR/../results_session_1x
         --num_steps_per_eval=14785 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=500 \
+        --first_eval=0 \
         --global_gradient_clip_ratio=0.0 \
         --total_steps=192205 \
         --l2_weight_decay=1e-4 \
@@ -51,7 +52,6 @@ mkdir -p $BASEDIR/../results_session_1x
         --amp \
         --xla \
         --use_batched_nms \
-        --disable_data_options \
         --async_eval \
         --use_ext \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_session_1x/results_session_1x.log

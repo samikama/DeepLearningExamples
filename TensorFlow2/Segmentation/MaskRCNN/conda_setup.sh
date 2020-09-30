@@ -23,10 +23,3 @@ cd cocoapi/PythonAPI
 make install
 conda install -y mpi4py
 pip install git+https://github.com/NVIDIA/dllogger.git
-
-source deactivate
-conda install -y -c conda-forge ipywidgets
-conda install -y -c conda-forge/label/gcc7 nodejs 
-
-jupyter nbextension enable --py widgetsnbextension
-jupyter labextension install @jupyter-widgets/jupyterlab-manager

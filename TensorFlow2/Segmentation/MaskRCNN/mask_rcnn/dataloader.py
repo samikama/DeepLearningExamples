@@ -25,6 +25,7 @@ positive examples to normalize the loss during training.
 import functools
 import math
 import multiprocessing
+import glob
 
 import tensorflow as tf
 
@@ -92,6 +93,27 @@ class InputReader(object):
 
         else:
             n_gpus = 1
+            
+        ##################################################
+        #This style of dataset sharding currently fails
+        #With more than 32 nodes on evaluation. 
+        #When MPI_size>32 and running eval, use this 
+        #simpler pipeline.
+        #################################################
+        
+        if do_dist_eval and n_gpus>32 and \
+            (self._mode == tf.estimator.ModeKeys.PREDICT or \
+             self._mode == tf.estimator.ModeKeys.EVAL):
+            files = glob.glob(self._file_pattern)
+            dataset = tf.data.TFRecordDataset(files)
+            _shard_idx, _num_shards = MPI_rank_and_size()
+            dataset = dataset.shard(_num_shards, _shard_idx)
+            parser = lambda x: dataset_parser(x, self._mode, params, self._use_instance_mask, seed=seed)
+            dataset = dataset.map(parser , num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            dataset = dataset.batch(batch_size=batch_size,drop_remainder=True)
+            dataset = dataset.repeat()
+            dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+            return dataset
 
         ##################################################
 

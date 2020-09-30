@@ -6,7 +6,6 @@ import threading
 from math import ceil
 
 import numpy as np
-from tqdm import tqdm
 import tensorflow as tf
 
 from mask_rcnn.utils.logging_formatter import logging
@@ -18,7 +17,7 @@ hvd.init()
 from mask_rcnn import dataloader
 from mask_rcnn import distributed_executer
 from mask_rcnn.tf2.mask_rcnn_model import SessionModel
-from mask_rcnn.hooks import pretrained_restore_hook
+from mask_rcnn.hooks import pretrained_restore_hook, logging_hook
 from mask_rcnn import evaluation
 
 from mask_rcnn.hyperparameters import mask_rcnn_params
@@ -40,26 +39,15 @@ logical_devices = tf.config.list_logical_devices('GPU')
 
 def train_epoch(model, sess, steps):
     if MPI_rank()==0:
-        p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         logging.info("Starting training loop")
-        loss_history = []
-    else:
-        p_bar = range(steps)
-    for _ in p_bar:
+    for _ in range(steps):
         model_output = sess.run(model.train_step)
-        if MPI_rank()==0:
-            loss_history.append(model_output['total_loss'])
-            lr = model_output['learning_rate']
-            p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), lr))
             
 def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
     if MPI_rank()==0:
-        p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         logging.info("Starting eval loop")
-    else:
-        p_bar = range(steps)
     worker_predictions = dict()
-    for i in p_bar:
+    for i in range(steps):
         out = sess.run(model.eval_step)
         out = evaluation.process_prediction_for_eval(out)
         for k, v in out.items():
@@ -67,16 +55,15 @@ def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
                 worker_predictions[k] = [v]
             else:
                 worker_predictions[k].append(v)
+    if MPI_rank()==0:
+        logging.info("Processing eval")
     coco = coco_metric.MaskCOCO()
     _preds = copy.deepcopy(worker_predictions)
     for k, v in _preds.items():
         _preds[k] = np.concatenate(v, axis=0)
-    if MPI_rank() < 32:
-        converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
-        worker_source_ids = _preds['source_id']
-    else:
-        converted_predictions = []
-        worker_source_ids = []
+    #if MPI_rank() < 32:
+    converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+    worker_source_ids = _preds['source_id']
     MPI.COMM_WORLD.barrier()
     predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
     source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
@@ -85,11 +72,9 @@ def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
         all_predictions = []
         source_ids = []
         for i, p in enumerate(predictions_list):
-            if i < 32:
-                all_predictions.extend(p)
+            all_predictions.extend(p)
         for i, s in enumerate(source_ids_list):
-            if i < 32:
-                source_ids.extend(s)
+            source_ids.extend(s)
         if use_ext:
             args = [all_predictions, validation_json_file]
             if async_eval:
@@ -114,7 +99,10 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     assign_op, feed_dict = pretrained_restore_hook.assign_from_checkpoint(run_config.checkpoint, var_map)
     if MPI_rank()==0:
         hooks.extend([tf.compat.v1.train.CheckpointSaverHook(run_config.model_dir,
-                                        save_steps=run_config.total_steps)])
+                                        save_steps=run_config.total_steps),
+                      logging_hook.AutoLoggingHook(log_every_n_steps=run_config.log_interval,
+                                        warmup_steps=run_config.warmup_steps,
+                                        is_training=True)])
     sess_config = model.get_session_config(use_xla=run_config.xla)
     session_creator=tf.compat.v1.train.ChiefSessionCreator(config=sess_config)
     sess = tf.compat.v1.train.MonitoredSession(session_creator=session_creator, hooks=hooks)

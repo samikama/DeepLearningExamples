@@ -50,6 +50,16 @@ This repository provides a script and recipe to train the Mask R-CNN model for T
 - [Release notes](#release-notes)
    * [Changelog](#changelog)
    * [Known issues](#known-issues)
+   
+- [AWS Modifications](#aws-modifications)
+   * [NMS](#nms)
+   * [Session](#session)
+   * [Tape](#tape)
+   * [Distributed Eval](#distributed-eval)
+   * [Fast Eval](#fast-eval)
+   * [Dataloader Options](#dataloder-options)
+   * [Environment](#environment)
+   * [Known Issues](#known-issues)
 
 ## Model overview
 
@@ -633,5 +643,69 @@ March 2020
 
 There are no known issues with this model.
 
+## AWS Modifications
 
+A Tensorflow 2 based model can be found under the TF2 directory. This model works 
+in any of estimator, session, or gradient tape, and is based on the tf.keras.Model format.
 
+In order to use the TF2 model, set the `--tf2` flag. Note that session and gradient tape
+are only available with TF2, while estimator will work with either TF2 or the previous
+TF1 based model.
+
+### NMS
+
+In the roi_ops.py file, tf.image.generate_bounding_box_proposals has been enabled. 
+This can be turned on by setting the `--use_custom_box_proposals_op` flag.
+
+### Session
+
+For easier interaction with the training loop, the session_executor.py file contains
+session based training and evaluation loops. This training format can be selected by 
+setting `--loop_mode="session"`
+
+### Tape
+
+A Tensorflow 2 style gradient tape loop is available in the tape_executor.py file.
+To select this training format, set `--loop_mode="tape"`. Note that currently tape
+has ~10% lower throughput than estimator or session.
+
+### Distributed Eval
+
+In order to run evaluation across all GPUs, enable the `--dist_eval` flag.
+
+### Fast Eval
+
+To run the Pycocotools portion of evaluation in a background thread while training continues,
+set the `--async_eval` flag.
+
+If Nvidia's Pycocotools are installed, you have the option of speeding up the pycocotools portion
+of eval by enabling the c++ based evaluation extenstions by setting `--use_ext`.
+
+### Dataloader Options
+
+The dataloader is set to use a number of experimental options. The default in the
+original Nvidia model was to have all of these on. The default here is to leave
+all but the prefetch slack on. Slack has been found to degrade performance in some settings,
+by causing unexpected periods of high CPU overhead. This can be turned back on with `--data_slack`.
+
+All experimental data loader options can be turned off by setting `--disable_data_options`.
+
+The default dataloader file interleaving fails on the evaluation data at more than 32 GPUs. 
+To solve this, the dataloader detects when more than 32 GPUs are present, and falls back to
+a simplified data pipeline.
+
+### Environment
+A conda_setup.sh file is included, which creates a mask_rcnn conda environment based on the
+DLAMI tensorflow2_latest_p37 environment. This setup file downloads data from S3, preprocesses weights,
+installs Nvidia's Pycocotools, mpi4py, and dllogger.
+
+### Known Issues
+For session, the estimator logging hook is used to display progress. It will show accurate loss information,
+but timing is slightly inaccurate. tf.timestamp should be used to get accurate step time information.
+
+The logging hook will also erronously display several warnings about loss scaling at the start of each
+evaluation cycle. These can be ignored.
+
+The gradient tape model currently uses tqdm to output training progress. On some terminal windows,
+tqdm will created repeated progress bars during training. This can be prevented by slightly resizing
+the window larger after starting training.
