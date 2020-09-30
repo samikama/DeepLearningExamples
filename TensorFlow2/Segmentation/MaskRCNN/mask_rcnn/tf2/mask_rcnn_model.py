@@ -92,7 +92,11 @@ def create_optimizer(learning_rate, params):
             increment_period=2000,
             multiplier=2.0
         )
-        optimizer = tf.compat.v1.train.experimental.MixedPrecisionLossScaleOptimizer(optimizer, loss_scale=loss_scale)
+        if params['loss_scale']>0:
+            optimizer = tf.compat.v1.train.experimental.MixedPrecisionLossScaleOptimizer(optimizer, 
+                                                                                         loss_scale=params['loss_scale'])
+        else:
+            optimizer = tf.compat.v1.train.experimental.MixedPrecisionLossScaleOptimizer(optimizer, loss_scale=loss_scale)
 
     return optimizer
 
@@ -636,9 +640,9 @@ class SessionModel(object):
                  is_training=True, **kwargs):
         self.run_config = run_config
         self.forward = MRCNN(run_config.values(), is_training=True, **kwargs)
-        self.train_tdf = train_input_fn(run_config.values()).make_initializable_iterator() \
+        self.train_tdf = tf.compat.v1.data.make_initializable_iterator(train_input_fn(run_config.values())) \
                             if train_input_fn else None
-        self.eval_tdf = eval_input_fn(run_config.values()).make_initializable_iterator() \
+        self.eval_tdf = tf.compat.v1.data.make_initializable_iterator(eval_input_fn(run_config.values())) \
                             if eval_input_fn else None
         self.train_step = self.train_fn()
         self.eval_step = self.eval_fn()

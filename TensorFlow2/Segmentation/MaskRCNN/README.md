@@ -700,11 +700,16 @@ DLAMI tensorflow2_latest_p37 environment. This setup file downloads data from S3
 installs Nvidia's Pycocotools, mpi4py, and dllogger.
 
 ### Known Issues
+tf.train.experimental.DynamicLossScale emits an eager tensor in TF2 when used with session. As a result,
+when running session, `--loss_scale` needs to be set to a fixed value.
+
 For session, the estimator logging hook is used to display progress. It will show accurate loss information,
 but timing is slightly inaccurate. tf.timestamp should be used to get accurate step time information.
 
 The logging hook will also erronously display several warnings about loss scaling at the start of each
 evaluation cycle. These can be ignored.
+
+Logging hook will also display loss scale warnings even when using a fixed loss.
 
 The gradient tape model currently uses tqdm to output training progress. On some terminal windows,
 tqdm will created repeated progress bars during training. This can be prevented by slightly resizing

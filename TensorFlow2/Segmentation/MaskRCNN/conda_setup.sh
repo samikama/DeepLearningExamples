@@ -23,3 +23,4 @@ cd cocoapi/PythonAPI
 make install
 conda install -y mpi4py
 pip install git+https://github.com/NVIDIA/dllogger.git
+

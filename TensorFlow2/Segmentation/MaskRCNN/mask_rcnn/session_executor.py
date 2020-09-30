@@ -40,7 +40,7 @@ logical_devices = tf.config.list_logical_devices('GPU')
 def train_epoch(model, sess, steps):
     if MPI_rank()==0:
         logging.info("Starting training loop")
-    for _ in range(steps):
+    for i in range(steps):
         model_output = sess.run(model.train_step)
             
 def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
@@ -94,7 +94,10 @@ def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
 def train_and_eval(run_config, train_input_fn, eval_input_fn):
     total_epochs = ceil(run_config.total_steps/run_config.num_steps_per_eval)
     model = SessionModel(run_config, train_input_fn, eval_input_fn)
-    hooks = [hvd.BroadcastGlobalVariablesHook(0)]
+    if MPI_is_distributed():
+        hooks = [hvd.BroadcastGlobalVariablesHook(0)]
+    else:
+        hooks = []
     var_map = pretrained_restore_hook.build_assigment_map('mrcnn/resnet50/')
     assign_op, feed_dict = pretrained_restore_hook.assign_from_checkpoint(run_config.checkpoint, var_map)
     if MPI_rank()==0:
