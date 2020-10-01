@@ -31,7 +31,7 @@ import itertools
 import collections
 import io
 import threading
-from time import time
+import time
 import json
 
 from PIL import Image
@@ -595,8 +595,8 @@ def get_image_summary(predictions, current_step, max_images=10):
     return summaries
 
 def fast_eval(predictions, annotations_file):
-    bbox_file_name = "bbox_predictions_{}.json".format(int(time()))
-    mask_file_name = "mask_predictions_{}.json".format(int(time()))
+    bbox_file_name = "bbox_predictions_{}.json".format(int(time.time()))
+    mask_file_name = "mask_predictions_{}.json".format(int(time.time()))
     box_predictions = []
     mask_predictions = []
     imgIds = []
