@@ -86,7 +86,7 @@ class _AutoLoggingHook(tf.estimator.SessionRunHook):
         self._is_training = is_training
         self._runtime_mode = RuntimeMode.TRAIN if is_training else RuntimeMode.VALIDATION
 
-        self._model_throughput = meters.MovingAverageMeter(window_size=1000)
+        self._model_throughput = meters.MovingAverageMeter(window_size=100000)
         self._model_stats = None
 
         self._n_gpus = None

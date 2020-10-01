@@ -38,7 +38,7 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 import pycocotools.mask as maskUtils
 
-import cv2
+#import cv2
 
 
 class MaskCOCO(COCO):

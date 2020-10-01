@@ -22,14 +22,33 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+from mpi4py import MPI
+
+os.environ["CUDA_VISIBLE_DEVICES"]=str(MPI.COMM_WORLD.Get_rank())
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
+os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
+os.environ["TF_GPU_THREAD_COUNT"] = "2"
+os.environ["SAMI_INTRA_THREADS"]="4"
+os.environ["SAMI_TF_INTER_THREADS"]="-1"
+#os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
+os.environ['CUDA_CACHE_DISABLE'] = '0'
+os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
+os.environ['TF_ADJUST_HUE_FUSED'] = '1'
+os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
+os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
+os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
+
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
 
 from absl import app
-
+# import pdb
+# pdb.set_trace()
 import tensorflow as tf
+tf.config.force_gpu_compatible(True)
+
+
 from tensorflow.python.framework.ops import disable_eager_execution
 
 from mask_rcnn.utils.logging_formatter import logging
@@ -47,7 +66,7 @@ from mask_rcnn.hyperparameters import params_io
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
 
 from mask_rcnn.utils.logging_formatter import log_cleaning
-import dllogger
+#import dllogger
 
 FLAGS = define_hparams_flags()
 
@@ -59,7 +78,7 @@ def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
         executer = distributed_executer.TFDistributedExecuter(runtime_config, mask_rcnn_model.mask_rcnn_model_fn)
     else:
         executer = distributed_executer.EstimatorExecuter(runtime_config, mask_rcnn_model.mask_rcnn_model_fn)
-
+    print("SAMI FLAGS eval_after_training",FLAGS.eval_after_training)
     if runtime_config.mode == 'train':
         executer.train(
             train_input_fn=train_input_fn,
@@ -120,8 +139,8 @@ def main(argv):
         if not RUN_CONFIG.include_groundtruth_in_features and not os.path.isfile(RUN_CONFIG.val_json_file):
             raise FileNotFoundError("Validation JSON File not found: %s" % RUN_CONFIG.val_json_file)
 
-    dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
-                                                           filename=RUN_CONFIG.log_path)])
+    # dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
+    #                                                        filename=RUN_CONFIG.log_path)])
 
     if RUN_CONFIG.mode in ('train', 'train_and_eval'):
         

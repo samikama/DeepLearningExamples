@@ -26,7 +26,7 @@ procedure.
 import itertools
 
 import tensorflow as tf
-import tensorflow_addons as tfa
+#import tensorflow_addons as tfa
 from mask_rcnn import anchors
 
 from mask_rcnn.models import fpn

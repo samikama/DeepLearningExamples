@@ -55,7 +55,7 @@ def get_training_hooks(mode, runtime_config): # model_dir, checkpoint_path=None,
     model_dir=runtime_config.model_dir
     checkpoint_path=runtime_config.checkpoint
     skip_checkpoint_variables=runtime_config.skip_checkpoint_variables
-
+    print("SAMI Loginterval=",runtime_config.log_interval)
     training_hooks = [
         AutoLoggingHook(
             log_every_n_steps=runtime_config.log_interval,
@@ -195,7 +195,7 @@ class BaseExecuter(object):
         config.gpu_options.force_gpu_compatible = True  # Force pinned memory
 
         if MPI_is_distributed():
-            config.gpu_options.visible_device_list = str(MPI_local_rank())
+            config.gpu_options.visible_device_list = "0"
 
       if use_xla and (mode == "train" or allow_xla_at_inference):
           logging.info("[%s] XLA is activated - Experiment Feature" % mode)
@@ -203,14 +203,14 @@ class BaseExecuter(object):
           # config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_2
 
       if mode == 'train':
-          config.intra_op_parallelism_threads = 1  # Avoid pool of Eigen threads
+          config.intra_op_parallelism_threads = int(os.environ.get("SAMI_TF_INTRA_THREADS","1"))  # Avoid pool of Eigen threads
 
           if MPI_is_distributed():
               config.inter_op_parallelism_threads = max(2, multiprocessing.cpu_count() // hvd.local_size())
 
           elif not use_tf_distributed:
               config.inter_op_parallelism_threads = 4
-
+          config.inter_op_parallelism_threads=int(os.environ.get("SAMI_TF_INTER_THREADS",config.inter_op_parallelism_threads))
       return config
 
   @abc.abstractmethod
@@ -292,7 +292,7 @@ class BaseExecuter(object):
     train_run_config = self.build_strategy_configuration('train')
     train_params = self.build_model_parameters('train')
     train_estimator = self.build_mask_rcnn_estimator(train_params, train_run_config, 'train')
-
+    print("SAMI log_steps=",self._runtime_config.log_interval)
     train_estimator.train(
         input_fn=train_input_fn,
         max_steps=self._runtime_config.total_steps,

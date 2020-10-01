@@ -34,8 +34,8 @@ from mask_rcnn.utils.metaclasses import SingletonMetaClass
 from mask_rcnn.utils.meters import ACCEPTED_INT_NUMBER_FORMATS
 from mask_rcnn.utils.meters import ACCEPTED_FLOAT_NUMBER_FORMATS
 
-import dllogger
-from dllogger import Verbosity
+# import dllogger
+# from dllogger import Verbosity
 
 __all__ = ["LoggingBackend", "LoggingScope", "DistributedStrategy", "RuntimeMode"]
 
@@ -283,7 +283,7 @@ class LoggingBackend(object):
         for key, value in sorted(metric_data.items(), key=operator.itemgetter(0)):
             print_value = LoggingBackend.format_metric_value(value)
             self.log_info("%s: %s" % (key, print_value))
-        dllogger.log(step=(), data=metric_data, verbosity=Verbosity.DEFAULT)
+        # dllogger.log(step=(), data=metric_data, verbosity=Verbosity.DEFAULT)
 
     # ================= Summary Logging Method ================= #
 
@@ -305,10 +305,10 @@ class LoggingBackend(object):
 
         print()  # Visual Spacing
         total_processing_time = total_processing_hours * 3600 + int(total_processing_minutes) * 60 + int(total_processing_seconds)
-        dllogger.log(step=(), data={
-            "Average_throughput": avg_throughput,
-            "Total processed steps": int(total_steps), 
-            "Total_processing_time": total_processing_time }, verbosity=Verbosity.DEFAULT)
+        # dllogger.log(step=(), data={
+        #     "Average_throughput": avg_throughput,
+        #     "Total processed steps": int(total_steps), 
+        #     "Total_processing_time": total_processing_time }, verbosity=Verbosity.DEFAULT)
         
         self.log_info("Average throughput: {throughput:.1f} samples/sec".format(throughput=avg_throughput))
         self.log_info("Total processed steps: {total_steps}".format(total_steps=total_steps))
