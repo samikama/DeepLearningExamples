@@ -51,6 +51,7 @@ mkdir -p $BASEDIR/../results_session_32x
         --val_json_file="/home/ubuntu/data/annotations/instances_val2017.json" \
         --amp \
         --xla \
+        --disable_tf2_behavior \
         --use_batched_nms \
         --async_eval \
         --use_ext \

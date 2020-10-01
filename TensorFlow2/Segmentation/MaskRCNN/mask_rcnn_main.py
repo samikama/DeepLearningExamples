@@ -98,8 +98,8 @@ def main(argv):
     
     if RUN_CONFIG.loop_mode in ['estimator', 'session']:
         disable_eager_execution()
-    # if RUN_CONFIG.loop_mode=='session':
-    #     tf.compat.v1.disable_v2_behavior()
+    if RUN_CONFIG.DEFINE_bool:
+        tf.compat.v1.disable_v2_behavior()
     
     # ============================ Configure parameters ============================ #
 

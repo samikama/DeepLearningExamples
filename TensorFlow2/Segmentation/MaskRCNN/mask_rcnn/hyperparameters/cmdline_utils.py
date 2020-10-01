@@ -73,6 +73,12 @@ def define_hparams_flags():
         default=0,
         help='A fixed loss scaling value, if using amp and not set, defaults to dynamic.'
     )
+    
+    flags.DEFINE_bool(
+        'disable_tf2_behavior',
+        default=False,
+        help='Disable Tensorflow 2 behavior.'
+    )
 
     flags.DEFINE_integer('eval_samples', default=5000, help='Number of training steps')
 
