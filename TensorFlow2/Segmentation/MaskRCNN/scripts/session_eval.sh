@@ -25,10 +25,10 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
-    /home/ubuntu/anaconda3/envs/tensorflow2_latest_p37/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    /home/ubuntu/anaconda3/envs/tensorflow2_latest_p37/bin/python ${BASEDIR}/../mask_rcnn_eval.py \
         --mode="train_and_eval" \
         --loop_mode="session" \
-        --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+        --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/model.ckpt-14785" \
         --eval_samples=5000 \
         --log_interval=100 \
         --init_learning_rate=0.01 \
@@ -36,7 +36,7 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../results_session_1x" \
-        --num_steps_per_eval=5000 \
+        --num_steps_per_eval=14785 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=500 \
         --global_gradient_clip_ratio=0.0 \

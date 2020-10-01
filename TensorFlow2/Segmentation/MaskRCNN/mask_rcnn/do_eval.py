@@ -3,13 +3,11 @@ import sys
 from statistics import mean
 import copy
 import threading
-import multiprocessing
 from math import ceil
-import subprocess
+
 import numpy as np
 from tqdm import tqdm
 import tensorflow as tf
-import time
 
 from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_rank, MPI_size, MPI_local_rank
@@ -29,31 +27,8 @@ from mask_rcnn.training import losses, learning_rates
 from mask_rcnn import coco_metric
 from mask_rcnn.utils import coco_utils
 
-os.environ['CUDA_CACHE_DISABLE'] = '0'
-os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
-os.environ['TF_ADJUST_HUE_FUSED'] = '1'
-os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
-os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
-os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
+import time
 
-devices = tf.config.list_physical_devices('GPU')
-tf.config.set_visible_devices([devices[MPI_local_rank()]], 'GPU')
-logical_devices = tf.config.list_logical_devices('GPU')
-
-def train_epoch(model, sess, steps):
-    if MPI_rank()==0:
-        p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-        logging.info("Starting training loop")
-        loss_history = []
-    else:
-        p_bar = range(steps)
-    for _ in p_bar:
-        model_output = sess.run(model.train_step)
-        if MPI_rank()==0:
-            loss_history.append(model_output['total_loss'])
-            lr = model_output['learning_rate']
-            p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), lr))
-            
 def run_eval(model, sess, steps, params, async_eval=False):
     if MPI_rank()==0:
         p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
@@ -99,40 +74,27 @@ def run_eval(model, sess, steps, params, async_eval=False):
         else:
             evaluation.compute_coco_eval_metric_n(*args)
 
-
-    
-def train_and_eval(run_config, train_input_fn, eval_input_fn):
-    total_epochs = ceil(run_config.total_steps/run_config.num_steps_per_eval)
+def do_eval(run_config, train_input_fn, eval_input_fn):
     model = SessionModel(run_config, train_input_fn, eval_input_fn)
     hooks = [hvd.BroadcastGlobalVariablesHook(0)]
-    var_map = pretrained_restore_hook.build_assigment_map('mrcnn/resnet50/')
-    assign_op, feed_dict = pretrained_restore_hook.assign_from_checkpoint(run_config.checkpoint, var_map)
-    
-#    args = [model, hooks, run_config, train_input_fn, eval_input_fn]
-#    e_thread = multiprocessing.Process(target=do_eval, name="do_eval", args=args)
-#    e_thread.start()
-
-
-    if MPI_rank()==0:
-        hooks.extend([tf.compat.v1.train.CheckpointSaverHook(run_config.model_dir,
-                                        save_steps=run_config.num_steps_per_eval)])
+    out_path = '/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/'
+    last = out_path+'model.ckpt-0'
+    saver = tf.compat.v1.train.Saver()
     sess_config = model.get_session_config(use_xla=run_config.xla)
     session_creator=tf.compat.v1.train.ChiefSessionCreator(config=sess_config)
     sess = tf.compat.v1.train.MonitoredSession(session_creator=session_creator, hooks=hooks)
-    sess.run(model.train_tdf.initializer)
-    sess.run(assign_op, feed_dict=feed_dict)
-    eval_workers = min(MPI_size(), 32)
-    #for epoch in range(run_config.first_eval):
-    #    if MPI_rank()==0:
-    #        logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-    #    train_epoch(model, sess, run_config.num_steps_per_eval)
-    #for epoch in range(run_config.first_eval, total_epochs):
-    for epoch in range(total_epochs):
-        if MPI_rank()==0:
-            logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-        train_epoch(model, sess, run_config.num_steps_per_eval)
-    #    if MPI_rank()==0:
-    #        logging.info("Running epoch {} evaluation".format(epoch+1))
-    #    sess.run(model.eval_tdf.initializer)
-    #    run_eval(model, sess, run_config.eval_samples//eval_workers, run_config, async_eval=run_config.async_eval)
     
+    eval_workers = min(32, MPI_size()) 
+    latest = tf.train.latest_checkpoint("/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/")
+    while True:
+        if last != latest:
+            print("#"*20, "New latest found", latest)
+            last = latest
+            sess.run(model.eval_tdf.initializer)
+            saver.restore(sess,latest)
+            run_eval(model, sess, run_config.eval_samples//eval_workers, run_config) 
+        else:
+            latest = tf.train.latest_checkpoint("/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/")
+            print("#"*20,"Nothing new here")
+            time.sleep(5)
+

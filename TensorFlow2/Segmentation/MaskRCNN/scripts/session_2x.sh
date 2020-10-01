@@ -13,43 +13,44 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-source activate tensorflow2_latest_p37
+#source activate tensorflow2_latest_p37
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-#rm -rf $BASEDIR/../results_session_1x
-#mkdir -p $BASEDIR/../results_session_1x
+rm -rf $BASEDIR/../results_session_1x
+mkdir -p $BASEDIR/../results_session_1x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    -np 8 -H localhost:8 \
-    -x NCCL_DEBUG=VERSION \
-    -x LD_LIBRARY_PATH \
+    --hostfile hostfile \
+    -x FI_PROVIDER="efa" \
+    -x NCCL_DEBUG=INFO \
+    -x LD_LIBRARY_PATH=/usr/local/cuda-11.0/efa/lib:/usr/local/cuda-11.0/lib:/usr/local/cuda-11.0/lib64:/usr/local/cuda-11.0:$LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
-    /home/ubuntu/anaconda3/envs/tensorflow2_latest_p37/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    /home/ubuntu/anaconda3/envs/tensorflow2_p36/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
         --loop_mode="session" \
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --log_interval=100 \
-        --init_learning_rate=0.01 \
+        --init_learning_rate=0.02 \
         --learning_rate_steps="118280,162635" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../results_session_1x" \
-        --num_steps_per_eval=5000 \
+        --num_steps_per_eval=7392 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=500 \
         --global_gradient_clip_ratio=0.0 \
-        --total_steps=192205 \
+        --total_steps=96102 \
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern="/home/ubuntu/fsx/nv_tfrecords/train*.tfrecord" \
-        --validation_file_pattern="/home/ubuntu/fsx/nv_tfrecords/val*.tfrecord" \
-        --val_json_file="/home/ubuntu/fsx/nv_tfrecords/annotations/instances_val2017.json" \
+        --training_file_pattern="/home/ubuntu/nv_tfrecords/train*.tfrecord" \
+        --validation_file_pattern="/home/ubuntu/nv_tfrecords/val*.tfrecord" \
+        --val_json_file="/home/ubuntu/nv_tfrecords/annotations/instances_val2017.json" \
         --amp \
         --xla \
-        --use_batched_nms \
+	--use_batched_nms \
         --disable_data_options \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_session_1x/results_session_1x.log
