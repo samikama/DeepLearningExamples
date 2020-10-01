@@ -75,7 +75,7 @@ from mask_rcnn.utils import coco_utils
 
 import time
 
-def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
+def run_eval(model, sess, steps, params, async_eval=True, use_ext=True):
     print("Starting run_eval fn")
     if MPI_rank()==0:
         p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
