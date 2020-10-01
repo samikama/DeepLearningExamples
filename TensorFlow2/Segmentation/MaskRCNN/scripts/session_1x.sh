@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-source activate mask_rcnn
+source activate tensorflow2_latest_p37
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_session_1x
@@ -25,7 +25,7 @@ mkdir -p $BASEDIR/../results_session_1x
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
-    /home/ubuntu/anaconda3/envs/mask_rcnn/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    /home/ubuntu/anaconda3/envs/tensorflow2_latest_p37/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
         --loop_mode="session" \
         --checkpoint="/home/ubuntu/fsx/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
@@ -36,7 +36,7 @@ mkdir -p $BASEDIR/../results_session_1x
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../results_session_1x" \
-        --num_steps_per_eval=5000 \
+        --num_steps_per_eval=500 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=500 \
         --first_eval=0 \

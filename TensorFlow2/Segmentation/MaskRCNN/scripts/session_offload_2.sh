@@ -36,14 +36,16 @@ mkdir -p $BASEDIR/../results_session_1x
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../results_session_1x" \
-        --num_steps_per_eval=5000 \
+        --num_steps_per_eval=100 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=500 \
+        --first_eval=0 \
         --global_gradient_clip_ratio=0.0 \
         --total_steps=192205 \
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
+        --disable_tf2_behavior \
         --dist_eval \
         --training_file_pattern="/home/ubuntu/fsx/nv_tfrecords/train*.tfrecord" \
         --validation_file_pattern="/home/ubuntu/fsx/nv_tfrecords/val*.tfrecord" \
@@ -52,8 +54,9 @@ mkdir -p $BASEDIR/../results_session_1x
         --xla \
         --use_batched_nms \
         --disable_data_options \
+        --async_eval \
+        --use_ext \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_session_1x/results_session_1x.log &
-
 
 source activate tensorflow2_latest_p37
 
@@ -94,6 +97,8 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --xla \
         --use_batched_nms \
         --disable_data_options \
-        --use_custom_box_proposals_op | tee $BASEDIR/../results_session_1x/eval_results_session_1x.log
+        --async_eval \
+        --use_ext \
+	--use_custom_box_proposals_op | tee $BASEDIR/../results_session_1x/eval_results_session_1x.log
 
 
