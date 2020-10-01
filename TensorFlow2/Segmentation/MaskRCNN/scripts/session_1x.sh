@@ -53,6 +53,4 @@ mkdir -p $BASEDIR/../results_session_1x
         --amp \
         --xla \
         --use_batched_nms \
-        --async_eval \
-        --use_ext \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_session_1x/results_session_1x.log

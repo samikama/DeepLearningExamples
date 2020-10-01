@@ -371,6 +371,7 @@ def evaluate(eval_estimator,
                     eval_thread = threading.Thread(target=fast_eval,
                                                    name="eval-thread", args=args)
                     eval_thread.start()
+                    return eval_thread
                 else:
                     fast_eval(*args)
             else:
@@ -378,10 +379,10 @@ def evaluate(eval_estimator,
                 if async_eval:
                     eval_thread = threading.Thread(target=compute_coco_eval_metric_n, name="eval-thread", args=args)
                     eval_thread.start()
+                    return eval_thread
                 else:
                     compute_coco_eval_metric_n(*args)
             logging.info("Launched compute eval metrics thread ...")
-            return eval_thread
         return None
     else:
         eval_results, predictions = compute_coco_eval_metric_1(

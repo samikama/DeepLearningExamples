@@ -45,7 +45,6 @@ mkdir -p $BASEDIR/../results_2x
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
-        --dist_eval \
         --training_file_pattern="/home/ubuntu/data/nv_coco/train*.tfrecord" \
         --validation_file_pattern="/home/ubuntu/data/nv_coco/val*.tfrecord" \
         --val_json_file="/home/ubuntu/data/annotations/instances_val2017.json" \
