@@ -37,8 +37,8 @@ echo "python ${BASEDIR}/../mask_rcnn_main.py \
         --train_batch_size=1 \
         --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern=\"/data/coco/coco-2017/tfrecords/train*.tfrecord\" \
-        --validation_file_pattern=\"/data/coco/coco-2017/tfrecords/val*.tfrecord\" \
+        --training_file_pattern=\"/data/coco/coco-2017/tfrecord/train*.tfrecord\" \
+        --validation_file_pattern=\"/data/coco/coco-2017/tfrecord/val*.tfrecord\" \
         --val_json_file=\"/data/coco/coco-2017/annotations/instances_val2017.json\" \
         --amp \
         --use_batched_nms \
@@ -69,7 +69,7 @@ echo "python ${BASEDIR}/../mask_rcnn_main.py \
         --num_steps_per_eval=14785 \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1800 \
-        --global_gradient_clip_ratio=5.0 \
+        --global_gradient_clip_ratio=0.0 \
         --total_steps=4000 \
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
