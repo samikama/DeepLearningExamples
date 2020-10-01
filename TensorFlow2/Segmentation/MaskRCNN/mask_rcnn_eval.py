@@ -75,8 +75,59 @@ from mask_rcnn.utils import coco_utils
 
 import time
 
+def run_eval(model, sess, steps, params, async_eval=True, use_ext=True):
+    if MPI_rank()==0:
+        p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+        logging.info("Starting eval loop")
+    else:
+        p_bar = range(steps)
+    worker_predictions = dict()
+    for i in p_bar:
+        out = sess.run(model.eval_step)
+        out = evaluation.process_prediction_for_eval(out)
+        for k, v in out.items():
+            if k not in worker_predictions:
+                worker_predictions[k] = [v]
+            else:
+                worker_predictions[k].append(v)
+    if MPI_rank()==0:
+        logging.info("Processing eval")
+    coco = coco_metric.MaskCOCO()
+    _preds = copy.deepcopy(worker_predictions)
+    for k, v in _preds.items():
+        _preds[k] = np.concatenate(v, axis=0)
+    #if MPI_rank() < 32:
+    converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+    worker_source_ids = _preds['source_id']
+    MPI.COMM_WORLD.barrier()
+    predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
+    source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
+    validation_json_file=params.val_json_file
+    if MPI_rank() == 0:
+        all_predictions = []
+        source_ids = []
+        for i, p in enumerate(predictions_list):
+            all_predictions.extend(p)
+        for i, s in enumerate(source_ids_list):
+            source_ids.extend(s)
+        if use_ext:
+            args = [all_predictions, validation_json_file]
+            if async_eval:
+                
+                eval_thread = threading.Thread(target=evaluation.fast_eval,
+                                                   name="eval-thread", args=args)
+                eval_thread.start()
+            else:
+                evaluation.fast_eval(*args)
+        else:
+            args = [all_predictions, source_ids, True, validation_json_file]
+            if async_eval:
+                eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, name="eval-thread", args=args)
+                eval_thread.start()
+            else:
+                evaluation.compute_coco_eval_metric_n(*args)
 
-def run_eval(model, sess, steps, params, async_eval=False):
+def run_eval_old(model, sess, steps, params, async_eval=False):
     if MPI_rank()==0:
         p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         logging.info("Starting eval loop")

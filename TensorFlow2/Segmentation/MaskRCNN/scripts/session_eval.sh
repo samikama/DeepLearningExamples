@@ -52,4 +52,6 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --xla \
         --use_batched_nms \
         --disable_data_options \
+        --async_eval \
+        --use_ext \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_session_1x/results_session_1x.log
