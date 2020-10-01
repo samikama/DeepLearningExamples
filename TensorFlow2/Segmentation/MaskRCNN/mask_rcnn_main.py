@@ -23,6 +23,14 @@ from __future__ import print_function
 
 import os
 
+from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
+import subprocess
+
+
+#if MPI_rank() == 0:
+#    evaluate = subprocess.Popen(['./session_eval.sh'])
+
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
@@ -33,7 +41,6 @@ import tensorflow as tf
 from tensorflow.python.framework.ops import disable_eager_execution
 
 from mask_rcnn.utils.logging_formatter import logging
-from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 
 from mask_rcnn import dataloader
 from mask_rcnn import distributed_executer
@@ -50,7 +57,6 @@ from mask_rcnn.utils.logging_formatter import log_cleaning
 import dllogger
 
 FLAGS = define_hparams_flags()
-
 
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
@@ -169,5 +175,4 @@ if __name__ == '__main__':
     logging.set_verbosity(logging.DEBUG)
     tf.autograph.set_verbosity(0)
     log_cleaning(hide_deprecation_warnings=True)
-
     app.run(main)

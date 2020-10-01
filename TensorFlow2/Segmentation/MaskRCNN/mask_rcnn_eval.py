@@ -124,7 +124,7 @@ def run_eval(model, sess, steps, params, async_eval=False):
 def do_eval(run_config, train_input_fn, eval_input_fn):
     model = SessionModel(run_config, train_input_fn, eval_input_fn)
     hooks = [hvd.BroadcastGlobalVariablesHook(0)]
-    out_path = '/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/'
+    out_path = '/home/ubuntu/fsx/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/'
     last = out_path+'model.ckpt-0'
     saver = tf.compat.v1.train.Saver()
     sess_config = model.get_session_config(use_xla=run_config.xla)
@@ -132,16 +132,17 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
     sess = tf.compat.v1.train.MonitoredSession(session_creator=session_creator, hooks=hooks)
 
     eval_workers = min(32, MPI_size())
-    latest = tf.train.latest_checkpoint("/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/")
+    latest = tf.train.latest_checkpoint("/home/ubuntu/fsx/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/")
+    
     while True:
-        if last != latest:
+        if last != latest and latest is not None:
             print("#"*20, "New latest found", latest)
             last = latest
             sess.run(model.eval_tdf.initializer)
             saver.restore(sess,latest)
             run_eval(model, sess, run_config.eval_samples//eval_workers, run_config)
         else:
-            latest = tf.train.latest_checkpoint("/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/")
+            latest = tf.train.latest_checkpoint("/home/ubuntu/fsx/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/")
             print("#"*20,"Nothing new here")
             time.sleep(5)
 

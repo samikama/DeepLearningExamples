@@ -16,8 +16,8 @@
 source activate tensorflow2_latest_p37
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-#rm -rf $BASEDIR/../results_session_1x
-#mkdir -p $BASEDIR/../results_session_1x
+rm -rf $BASEDIR/../results_session_1x
+mkdir -p $BASEDIR/../results_session_1x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     -np 8 -H localhost:8 \
@@ -28,7 +28,7 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
     /home/ubuntu/anaconda3/envs/tensorflow2_latest_p37/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
         --loop_mode="session" \
-        --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+        --checkpoint="/home/ubuntu/fsx/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --log_interval=100 \
         --init_learning_rate=0.01 \

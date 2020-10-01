@@ -108,9 +108,7 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     var_map = pretrained_restore_hook.build_assigment_map('mrcnn/resnet50/')
     assign_op, feed_dict = pretrained_restore_hook.assign_from_checkpoint(run_config.checkpoint, var_map)
     
-#    args = [model, hooks, run_config, train_input_fn, eval_input_fn]
-#    e_thread = multiprocessing.Process(target=do_eval, name="do_eval", args=args)
-#    e_thread.start()
+    
 
 
     if MPI_rank()==0:
