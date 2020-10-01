@@ -45,7 +45,7 @@ mkdir -p $BASEDIR/../results_session_1x
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
-        --loss_scale=4096 \
+        --disable_tf2_behavior \
         --dist_eval \
         --training_file_pattern="/home/ubuntu/data/nv_coco/train*.tfrecord" \
         --validation_file_pattern="/home/ubuntu/data/nv_coco/val*.tfrecord" \

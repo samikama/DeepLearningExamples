@@ -31,11 +31,11 @@ mkdir -p $BASEDIR/../results_session_single_gpu
         --model_dir="$BASEDIR/../results_session_single_gpu" \
         --num_steps_per_eval=118287 \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=500 \
+        --warmup_steps=250 \
         --first_eval=0 \
         --global_gradient_clip_ratio=0.0 \
         --total_steps=1419444 \
-        --loss_scale=4096 \
+        --disable_tf2_behavior \
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \

@@ -42,6 +42,8 @@ def train_epoch(model, sess, steps):
         logging.info("Starting training loop")
     for i in range(steps):
         model_output = sess.run(model.train_step)
+        if i%100==0:
+            print(model_output['total_loss'])
             
 def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
     if MPI_rank()==0:
@@ -100,7 +102,7 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         hooks = []
     var_map = pretrained_restore_hook.build_assigment_map('mrcnn/resnet50/')
     assign_op, feed_dict = pretrained_restore_hook.assign_from_checkpoint(run_config.checkpoint, var_map)
-    if MPI_rank()==0:
+    '''if MPI_rank()==0:
         hooks.extend([tf.compat.v1.train.CheckpointSaverHook(run_config.model_dir,
                                         save_steps=run_config.total_steps),
                       logging_hook.AutoLoggingHook(log_every_n_steps=run_config.log_interval,
@@ -108,7 +110,11 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
                                         is_training=True)])
     sess_config = model.get_session_config(use_xla=run_config.xla)
     session_creator=tf.compat.v1.train.ChiefSessionCreator(config=sess_config)
-    sess = tf.compat.v1.train.MonitoredSession(session_creator=session_creator, hooks=hooks)
+    sess = tf.compat.v1.train.MonitoredSession(session_creator=session_creator, hooks=hooks)'''
+    sess_config = model.get_session_config(use_xla=run_config.xla)
+    broadcast = hvd.broadcast_global_variables(0)
+    sess = tf.compat.v1.Session(config=sess_config)
+    sess.run(tf.compat.v1.global_variables_initializer())
     sess.run(model.train_tdf.initializer)
     sess.run(assign_op, feed_dict=feed_dict)
     #eval_workers = min(MPI_size(), 32)
@@ -116,10 +122,14 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     for epoch in range(run_config.first_eval):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
+        if MPI_is_distributed():
+            sess.run(broadcast)
         train_epoch(model, sess, run_config.num_steps_per_eval)
     for epoch in range(run_config.first_eval, total_epochs):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
+        if MPI_is_distributed():
+            sess.run(broadcast)
         train_epoch(model, sess, run_config.num_steps_per_eval)
         if MPI_rank()==0:
             logging.info("Running epoch {} evaluation".format(epoch+1))
