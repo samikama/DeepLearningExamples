@@ -40,10 +40,13 @@ logical_devices = tf.config.list_logical_devices('GPU')
 def train_epoch(model, sess, steps):
     if MPI_rank()==0:
         logging.info("Starting training loop")
+        loss_history = []
     for i in range(steps):
         model_output = sess.run(model.train_step)
-        if i%100==0:
-            print(model_output['total_loss'])
+        loss_history.append(model_output['total_loss'])
+        if i%100==0 and MPI_rank()==0:
+            logging.info("Loss: {}".format(mean(loss_history)))
+            loss_history = []
             
 def run_eval(model, sess, steps, params, async_eval=False, use_ext=False):
     if MPI_rank()==0:
