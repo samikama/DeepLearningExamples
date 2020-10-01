@@ -111,7 +111,8 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     sess = tf.compat.v1.train.MonitoredSession(session_creator=session_creator, hooks=hooks)
     sess.run(model.train_tdf.initializer)
     sess.run(assign_op, feed_dict=feed_dict)
-    eval_workers = min(MPI_size(), 32)
+    #eval_workers = min(MPI_size(), 32)
+    eval_workers = MPI_size()
     for epoch in range(run_config.first_eval):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
