@@ -43,7 +43,8 @@ def train_epoch(model, sess, steps):
         loss_history = []
     for i in range(steps):
         model_output = sess.run(model.train_step)
-        loss_history.append(model_output['total_loss'])
+        if MPI_rank()==0:
+            loss_history.append(model_output['total_loss'])
         if i%100==0 and MPI_rank()==0:
             logging.info("Loss: {}".format(mean(loss_history)))
             loss_history = []
