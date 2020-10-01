@@ -341,7 +341,7 @@ class EvaluationMetric(object):
         atexit.register(tf.io.gfile.remove, local_val_json)
       else:
         local_val_json = filename
-      self.coco_gt = MaskCOCO(local_val_json) #, use_ext=True)
+      self.coco_gt = MaskCOCO(local_val_json)#, use_ext=True)
     self.filename = filename
     self.metric_names = ['AP', 'AP50', 'AP75', 'APs', 'APm', 'APl', 'ARmax1',
                          'ARmax10', 'ARmax100', 'ARs', 'ARm', 'ARl']
@@ -369,7 +369,7 @@ class EvaluationMetric(object):
       self.coco_gt.reset(groundtruth_data)
     coco_dt = self.coco_gt.loadRes2(
         predictions, self._include_mask, is_image_mask=is_predict_image_mask)
-    coco_eval = COCOeval(self.coco_gt, coco_dt, iouType='bbox') #, use_ext=True, num_threads=32) 
+    coco_eval = COCOeval(self.coco_gt, coco_dt, iouType='bbox')#, use_ext=True, num_threads=32) 
     coco_eval.params.imgIds = image_ids
     coco_eval.evaluate()
     coco_eval.accumulate()
@@ -378,7 +378,7 @@ class EvaluationMetric(object):
 
     if self._include_mask:
       # Create another object for instance segmentation metric evaluation.
-      mcoco_eval = COCOeval(self.coco_gt, coco_dt, iouType='segm') # , use_ext=True, num_threads=32)
+      mcoco_eval = COCOeval(self.coco_gt, coco_dt, iouType='segm')#, use_ext=True, num_threads=32)
       mcoco_eval.params.imgIds = image_ids
       mcoco_eval.evaluate()
       mcoco_eval.accumulate()

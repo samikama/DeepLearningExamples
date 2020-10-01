@@ -67,6 +67,18 @@ def define_hparams_flags():
         default=10,
         help='How often to print training log.'
     )
+    
+    flags.DEFINE_integer(
+        'loss_scale',
+        default=0,
+        help='A fixed loss scaling value, if using amp and not set, defaults to dynamic.'
+    )
+    
+    flags.DEFINE_bool(
+        'disable_tf2_behavior',
+        default=False,
+        help='Disable Tensorflow 2 behavior.'
+    )
 
     flags.DEFINE_integer('eval_samples', default=5000, help='Number of training steps')
 
@@ -117,6 +129,14 @@ def define_hparams_flags():
         help=('asyn evaluation to run during next epoch.'
         )
     )
+    
+    flags.DEFINE_bool(
+        'use_ext',
+        default=False,
+        help=('use c++ extionsion for fast eval (must have nvidia pycocotools).'
+        )
+    )
+    
 
     # Gradient clipping is a fairly coarse heuristic to stabilize training.
     # This model clips the gradient by its L2 norm globally (i.e., across

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-source activate tensorflow2_latest_p37
+source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_session_32x
@@ -25,7 +25,7 @@ mkdir -p $BASEDIR/../results_session_32x
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
-    /home/ubuntu/anaconda3/envs/tensorflow2_latest_p37/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    /home/ubuntu/anaconda3/envs/mask_rcnn/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
         --loop_mode="session" \
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
@@ -51,5 +51,8 @@ mkdir -p $BASEDIR/../results_session_32x
         --val_json_file="/home/ubuntu/data/annotations/instances_val2017.json" \
         --amp \
         --xla \
+        --disable_tf2_behavior \
         --use_batched_nms \
+        --async_eval \
+        --use_ext \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_session_32x/results_session_32x.log

@@ -489,7 +489,7 @@ def setup_tensorflow_hook(sess, logging_proxy, is_training, is_initialized):
 
             trainable_variables = get_trainable_variables()
 
-            def count_weights_in_varlist(var_list):
+            '''def count_weights_in_varlist(var_list):
                 return np.sum([np.prod(s.get_shape()) for s in var_list])
 
             logging_proxy.log_git_status()
@@ -501,7 +501,7 @@ def setup_tensorflow_hook(sess, logging_proxy, is_training, is_initialized):
                 }
             )
 
-            logging_proxy.log_trainable_variables([(var.name, var.get_shape()) for var in trainable_variables])
+            logging_proxy.log_trainable_variables([(var.name, var.get_shape()) for var in trainable_variables])'''
 
     else:
 

@@ -328,7 +328,9 @@ class BaseExecuter(object):
                 self._runtime_config.eval_batch_size,
                 self._runtime_config.include_mask,
                 self._runtime_config.val_json_file,
-                report_frequency=self._runtime_config.report_frequency
+                report_frequency=self._runtime_config.report_frequency,
+                async_eval=self._runtime_config.async_eval,
+                use_ext=self._runtime_config.use_ext
             )
     else:
         if eval_estimator is None:

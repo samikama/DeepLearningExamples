@@ -21,6 +21,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import copy
 import operator
 import pprint
@@ -30,6 +31,8 @@ import itertools
 import collections
 import io
 import threading
+import time
+import json
 
 from PIL import Image
 
@@ -46,6 +49,9 @@ from mask_rcnn.utils.distributed_utils import MPI_rank
 
 import dllogger
 from dllogger import Verbosity
+
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
 
 
 def process_prediction_for_eval(prediction):
@@ -310,7 +316,9 @@ def evaluate(eval_estimator,
              validation_json_file="",
              report_frequency=None,
              latest_ckpt=None,
-             do_distributed=False):
+             do_distributed=False,
+             async_eval=False,
+             use_ext=False):
 
     """Runs COCO evaluation once."""
     predictor = eval_estimator.predict(
@@ -357,9 +365,21 @@ def evaluate(eval_estimator,
                     source_ids.extend(s)
 
             # run metric calculation on root node TODO: launch this in it's own thread
-            args = [all_predictions, source_ids, include_mask, validation_json_file]
-            eval_thread = threading.Thread(target=compute_coco_eval_metric_n, name="eval-thread", args=args)
-            eval_thread.start()
+            if use_ext:
+                args = [all_predictions, validation_json_file]
+                if async_eval:
+                    eval_thread = threading.Thread(target=fast_eval,
+                                                   name="eval-thread", args=args)
+                    eval_thread.start()
+                else:
+                    fast_eval(*args)
+            else:
+                args = [all_predictions, source_ids, include_mask, validation_json_file]
+                if async_eval:
+                    eval_thread = threading.Thread(target=compute_coco_eval_metric_n, name="eval-thread", args=args)
+                    eval_thread.start()
+                else:
+                    compute_coco_eval_metric_n(*args)
             logging.info("Launched compute eval metrics thread ...")
             return eval_thread
         return None
@@ -574,3 +594,45 @@ def get_image_summary(predictions, current_step, max_images=10):
 
     return summaries
 
+def fast_eval(predictions, annotations_file):
+    bbox_file_name = "bbox_predictions_{}.json".format(int(time.time()))
+    mask_file_name = "mask_predictions_{}.json".format(int(time.time()))
+    box_predictions = []
+    mask_predictions = []
+    imgIds = []
+    for a_prediction in predictions:
+        imgIds.append(a_prediction['image_id'])
+        segmentation = {'size': a_prediction['segmentation']['size'],
+                        'counts': a_prediction['segmentation']['counts'].decode()}
+        box_predictions.append({'image_id': a_prediction['image_id'],
+                                'category_id': a_prediction['category_id'],
+                                'bbox': list(map(lambda x: float(round(x, 2)), a_prediction['bbox'][:4])),
+                                'score': float(a_prediction['score'])})
+        mask_predictions.append({'image_id': a_prediction['image_id'],
+                                 'category_id': a_prediction['category_id'],
+                                 'score': float(a_prediction['score']),
+                                 'segmentation': segmentation})
+    
+    with open(bbox_file_name, 'w') as outfile:
+        json.dump(box_predictions, outfile)
+    with open(mask_file_name, 'w') as outfile:
+        json.dump(mask_predictions, outfile)
+    imgIds = list(set(imgIds))
+    
+    cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
+    cocoDt = cocoGt.loadRes(bbox_file_name, use_ext=True)
+    cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=True)
+    cocoEval.params.imgIds  = imgIds
+    cocoEval.evaluate()
+    cocoEval.accumulate()
+    cocoEval.summarize()
+    
+    cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
+    cocoDt = cocoGt.loadRes(mask_file_name, use_ext=True)
+    cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=True)
+    cocoEval.params.imgIds  = imgIds
+    cocoEval.evaluate()
+    cocoEval.accumulate()
+    cocoEval.summarize()
+    os.remove(bbox_file_name)
+    os.remove(mask_file_name)
