@@ -16,7 +16,7 @@
 # Batch size per gpu 4 on arbitrary number of nodes
 # as specified in hosts file
 
-BATCH_SIZE=4
+BATCH_SIZE=1
 HOST_COUNT=`wc -l < ~/hosts`
 GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 IMAGES=118287
@@ -25,6 +25,7 @@ STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
 FIRST_DECAY=$(( 10 * STEP_PER_EPOCH ))
 SECOND_DECAY=$(( 14 * STEP_PER_EPOCH ))
 TOTAL_STEPS=$(( 16 * STEP_PER_EPOCH ))
+LEARNING_RATE=$(echo $GLOBAL_BATCH_SIZE*0.00125 | bc)
 
 source activate mask_rcnn
 
@@ -43,7 +44,7 @@ mkdir -p $BASEDIR/../results_tape_1x
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --log_interval=100 \
-        --init_learning_rate=0.16 \
+        --init_learning_rate=0.24 \
         --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
