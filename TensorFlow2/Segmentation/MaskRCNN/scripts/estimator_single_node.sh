@@ -22,6 +22,8 @@ STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
 FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
 SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
 TOTAL_STEPS=$(( 13 * STEP_PER_EPOCH ))
+LR_MULTIPLIER=0.001
+BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
 source activate mask_rcnn
 
@@ -40,7 +42,7 @@ mkdir -p $BASEDIR/../baseline_1x
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --log_interval=100 \
-        --init_learning_rate=0.04 \
+        --init_learning_rate=$BASE_LR \
         --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \

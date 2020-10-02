@@ -25,13 +25,14 @@ STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
 FIRST_DECAY=$(( 12 * STEP_PER_EPOCH ))
 SECOND_DECAY=$(( 16 * STEP_PER_EPOCH ))
 TOTAL_STEPS=$(( 19 * STEP_PER_EPOCH ))
-LEARNING_RATE=$(echo $GLOBAL_BATCH_SIZE*0.00125 | bc)
+LR_MULTIPLIER=0.001
+BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
 source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../results_tape_1x
-mkdir -p $BASEDIR/../results_tape_1x
+rm -rf $BASEDIR/../results_estimator_1x
+mkdir -p $BASEDIR/../results_estimator_1x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     --hostfile ~/hosts \
@@ -44,11 +45,11 @@ mkdir -p $BASEDIR/../results_tape_1x
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --log_interval=100 \
-        --init_learning_rate=0.24 \
+        --init_learning_rate=$BASE_LR \
         --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../results_tape_1x" \
+        --model_dir="$BASEDIR/../results_estimator_1x" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1500 \
@@ -65,5 +66,4 @@ mkdir -p $BASEDIR/../results_tape_1x
         --xla \
         --use_batched_nms \
         --async_eval \
-        --use_ext \
-        --use_custom_box_proposals_op | tee $BASEDIR/../results_tape_1x/results_tape_1x.log
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_estimator_1x/results_estimator_1x.log
