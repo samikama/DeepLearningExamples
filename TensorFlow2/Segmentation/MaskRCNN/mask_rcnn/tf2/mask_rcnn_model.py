@@ -640,9 +640,11 @@ class SessionModel(object):
                  is_training=True, **kwargs):
         self.run_config = run_config
         self.forward = MRCNN(run_config.values(), is_training=True, **kwargs)
-        self.train_tdf = tf.compat.v1.data.make_initializable_iterator(train_input_fn(run_config.values())) \
+        train_params = dict(run_config.values(), batch_size=run_config.train_batch_size)
+        self.train_tdf = tf.compat.v1.data.make_initializable_iterator(train_input_fn(train_params)) \
                             if train_input_fn else None
-        self.eval_tdf = tf.compat.v1.data.make_initializable_iterator(eval_input_fn(run_config.values())) \
+        eval_params = dict(run_config.values(), batch_size=run_config.eval_batch_size)
+        self.eval_tdf = tf.compat.v1.data.make_initializable_iterator(eval_input_fn(eval_params)) \
                             if eval_input_fn else None
         self.train_step = self.train_fn()
         self.eval_step = self.eval_fn()
@@ -821,9 +823,11 @@ class TapeModel(object):
     def __init__(self, params, train_input_fn=None, eval_input_fn=None, is_training=True):
         self.params = params
         self.forward = MRCNN(self.params.values(), is_training=is_training)
-        self.train_tdf = iter(train_input_fn(self.params.values())) \
+        train_params = dict(self.params.values(), batch_size=self.params.train_batch_size)
+        self.train_tdf = iter(train_input_fn(train_params)) \
                             if train_input_fn else None
-        self.eval_tdf = iter(eval_input_fn(self.params.values())) \
+        eval_params = dict(self.params.values(), batch_size=self.params.eval_batch_size)
+        self.eval_tdf = iter(eval_input_fn(eval_params).repeat()) \
                             if eval_input_fn else None
         self.optimizer, self.schedule = self.get_optimizer()
     
