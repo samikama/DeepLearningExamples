@@ -601,21 +601,23 @@ def fast_eval(predictions, annotations_file):
                         'counts': a_prediction['segmentation']['counts'].decode()}
         box_predictions.append({'image_id': a_prediction['image_id'],
                                 'category_id': a_prediction['category_id'],
-                                'bbox': list(map(lambda x: float(round(x, 2)), a_prediction['bbox'][:4])),
+                                'bbox': list(map(lambda x: float(round(x, 2)), 
+                                                 a_prediction['bbox'][:4])),
                                 'score': float(a_prediction['score'])})
         mask_predictions.append({'image_id': a_prediction['image_id'],
                                  'category_id': a_prediction['category_id'],
                                  'score': float(a_prediction['score']),
                                  'segmentation': segmentation})
     
-    with open(bbox_file_name, 'w') as outfile:
+    '''with open(bbox_file_name, 'w') as outfile:
         json.dump(box_predictions, outfile)
     with open(mask_file_name, 'w') as outfile:
-        json.dump(mask_predictions, outfile)
+        json.dump(mask_predictions, outfile)'''
     imgIds = list(set(imgIds))
     
     cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
-    cocoDt = cocoGt.loadRes(bbox_file_name, use_ext=True)
+    # cocoDt = cocoGt.loadRes(bbox_file_name, use_ext=True)
+    cocoDt = cocoGt.loadRes(box_predictions, use_ext=True)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=True)
     cocoEval.params.imgIds  = imgIds
     cocoEval.evaluate()
@@ -623,11 +625,12 @@ def fast_eval(predictions, annotations_file):
     cocoEval.summarize()
     
     cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
-    cocoDt = cocoGt.loadRes(mask_file_name, use_ext=True)
+    # cocoDt = cocoGt.loadRes(mask_file_name, use_ext=True)
+    cocoDt = cocoGt.loadRes(mask_predictions, use_ext=True)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=True)
     cocoEval.params.imgIds  = imgIds
     cocoEval.evaluate()
     cocoEval.accumulate()
     cocoEval.summarize()
-    os.remove(bbox_file_name)
-    os.remove(mask_file_name)
+    # os.remove(bbox_file_name)
+    # os.remove(mask_file_name)

@@ -160,6 +160,8 @@ def define_hparams_flags():
     flags.DEFINE_string('optimizer_type', default='SGD', help='Optimizer to use - SGD or LAMB')
     
     flags.DEFINE_string('lr_schedule', default='piecewise', help='Learning rate schedule - piecewise or cosine')
+    
+    flags.DEFINE_float("alpha", default=0.001, help='cosine decay end point')
 
     flags.DEFINE_string(
         'model_dir',

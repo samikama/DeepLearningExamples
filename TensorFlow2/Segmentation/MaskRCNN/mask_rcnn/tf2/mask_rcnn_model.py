@@ -23,6 +23,7 @@ procedure.
 
 """
 
+import sys
 import itertools
 import copy
 import numpy as np
@@ -842,10 +843,17 @@ class TapeModel(object):
             schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(self.params.learning_rate_steps,
                                                                             [self.params.init_learning_rate] + \
                                                                             self.params.learning_rate_levels)
+            schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
+                                                    self.params.warmup_steps)
+        elif: self.params.lr_schedule=='cosine':
+            schedule = tf.keras.experimental.CosineDecay(self.params.init_learning_rate,
+                                                         self.params.total_steps - self.params.warmup_steps,
+                                                         alpha=self.params.alpha)
+            schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
+                                                    self.params.warmup_steps, overlap=False)
         else:
             raise NotImplementedError
-        schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
-                                                    self.params.warmup_steps)
+        
         if self.params.optimizer_type=="SGD":
             opt = tf.keras.optimizers.SGD(learning_rate=schedule, 
                                           momentum=self.params.momentum)
@@ -927,7 +935,8 @@ class TapeModel(object):
     def train_epoch(self, steps, broadcast=False):
         if MPI_rank()==0:
             logging.info("Starting training loop")
-            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+            p_bar = tqdm(range(steps), file=sys.stdout, 
+                         bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             loss_history = []
         else:
             p_bar = range(steps)
@@ -961,7 +970,8 @@ class TapeModel(object):
     def run_eval(self, steps, async_eval=False, use_ext=False):
         if MPI_rank()==0:
             logging.info("Starting eval loop")
-            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+            p_bar = tqdm(range(steps), file=sys.stdout, 
+                         bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         else:
             p_bar = range(steps)
         worker_predictions = dict()
@@ -987,7 +997,11 @@ class TapeModel(object):
         #     converted_predictions = defaultdict(list)
         #     worker_source_ids = []
         MPI.COMM_WORLD.barrier()
+        if MPI_rank() == 0:
+            logging.info("Gathering logs")
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
+        if MPI_rank() == 0:
+            logging.info("logs gathered")
         # source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
         if MPI_rank() == 0:
@@ -997,8 +1011,9 @@ class TapeModel(object):
                 all_predictions.extend(p)
             for i, s in enumerate(source_ids_list):
                 source_ids.extend(s)'''
-            all_predictions = dict()
+            all_predictions = []
             source_ids = []
+            logging.info("Assembling results")
             for i, p in enumerate(predictions_list):
                 for a_key, a_value in p.items():
                     if a_key not in source_ids:
