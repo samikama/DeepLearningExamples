@@ -845,7 +845,7 @@ class TapeModel(object):
                                                                             self.params.learning_rate_levels)
             schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
                                                     self.params.warmup_steps)
-        elif: self.params.lr_schedule=='cosine':
+        elif self.params.lr_schedule=='cosine':
             schedule = tf.keras.experimental.CosineDecay(self.params.init_learning_rate,
                                                          self.params.total_steps - self.params.warmup_steps,
                                                          alpha=self.params.alpha)
