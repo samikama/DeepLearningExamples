@@ -22,7 +22,7 @@ model architecture, loss function, learning rate schedule, and evaluation
 procedure.
 
 """
-
+import time
 import itertools
 import copy
 import numpy as np
@@ -930,6 +930,8 @@ class TapeModel(object):
             loss_history = []
         else:
             p_bar = range(steps)
+
+        timings=[]
         for i in p_bar:
             if broadcast and i==0:
                 b_w, b_o = True, True
@@ -937,14 +939,22 @@ class TapeModel(object):
                 b_w, b_o = False, True
             else:
                 b_w, b_o = False, False
+            
+            tstart = time.perf_counter()
             features, labels = next(self.train_tdf)
             loss_dict = self.train_step(features, labels, b_w, b_o)
+            delta_t = time.perf_counter() - tstart
+            timings.append(delta_t)
             if MPI_rank()==0:
                 loss_history.append(loss_dict['total_loss'].numpy())
                 step = self.optimizer.iterations
                 learning_rate = self.schedule(step)
                 p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
                                                                           learning_rate))
+            if i%500 == 0:
+                timings = np.asarray(timings, np.float)
+                print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
+                timings = []
     @tf.function            
     def predict(self, features):
         labels = None
