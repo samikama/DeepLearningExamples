@@ -24,7 +24,7 @@ procedure.
 """
 
 import itertools
-import copy
+import copy,os
 import numpy as np
 import multiprocessing
 from statistics import mean
@@ -807,7 +807,7 @@ class SessionModel(object):
         else:
             config.gpu_options.force_gpu_compatible = True
             if MPI_is_distributed():
-                config.gpu_options.visible_device_list = str(MPI_local_rank())
+                config.gpu_options.visible_device_list = ",".join([str(x) for x in range(len(os.environ.get("CUDA_VISIBLE_DEVICES","0").split(",")))])
         if use_xla:
             logging.info("XLA is activated - Experiment Feature")
             config.graph_options.optimizer_options.global_jit_level = tf.compat.v1.OptimizerOptions.ON_1

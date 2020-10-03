@@ -195,7 +195,7 @@ class BaseExecuter(object):
         config.gpu_options.force_gpu_compatible = True  # Force pinned memory
 
         if MPI_is_distributed():
-            config.gpu_options.visible_device_list = str(MPI_local_rank())
+            config.gpu_options.visible_device_list = ",".join([str(x) for x in range(len(os.environ.get("CUDA_VISIBLE_DEVICES","0").split(",")))])
 
       if use_xla and (mode == "train" or allow_xla_at_inference):
           logging.info("[%s] XLA is activated - Experiment Feature" % mode)

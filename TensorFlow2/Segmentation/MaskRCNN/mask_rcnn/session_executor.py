@@ -33,9 +33,9 @@ os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
 os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
 
-devices = tf.config.list_physical_devices('GPU')
-tf.config.set_visible_devices([devices[MPI_local_rank()]], 'GPU')
-logical_devices = tf.config.list_logical_devices('GPU')
+#devices = tf.config.list_physical_devices('GPU')
+#tf.config.set_visible_devices(,"GPU")
+#logical_devices = tf.config.list_logical_devices('GPU')
 
 def train_epoch(model, sess, steps):
     if MPI_rank()==0:

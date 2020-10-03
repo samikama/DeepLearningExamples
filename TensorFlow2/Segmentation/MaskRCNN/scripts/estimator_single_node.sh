@@ -38,10 +38,10 @@ mkdir -p $BASEDIR/../baseline_1x
     --oversubscribe \
     python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train" \
-        --eval_after_training=0 \
+        --eval_after_training=1 \
         --checkpoint="${BASEDIR}/../weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
-        --log_interval=100 \
+        --log_interval=1000 \
         --init_learning_rate=0.04 \
         --learning_rate_steps="${FIRST_DECAY},${SECOND_DECAY}" \
         --optimizer_type="SGD" \
@@ -56,8 +56,8 @@ mkdir -p $BASEDIR/../baseline_1x
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern="${DATA_PATH}/tfrecord/train*.tfrecord" \
-        --validation_file_pattern="${DATA_PATH}/tfrecord/val*.tfrecord" \
+        --training_file_pattern="${DATA_PATH}/nv_coco/train*.tfrecord" \
+        --validation_file_pattern="${DATA_PATH}/nv_coco/val*.tfrecord" \
         --val_json_file="${DATA_PATH}/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \

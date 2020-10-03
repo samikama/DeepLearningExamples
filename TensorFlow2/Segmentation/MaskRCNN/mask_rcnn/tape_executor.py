@@ -19,9 +19,9 @@ if MPI_is_distributed:
     import horovod.tensorflow as hvd
     hvd.init()
     
-devices = tf.config.list_physical_devices('GPU')
-tf.config.set_visible_devices([devices[MPI_local_rank()]], 'GPU')
-logical_devices = tf.config.list_logical_devices('GPU')
+#devices = tf.config.list_physical_devices('GPU')
+#tf.config.set_visible_devices(list(range(len(os.environ.get("CUDA_VISIBLE_DEVICES","0").split(",")))),"GPU")
+#logical_devices = tf.config.list_logical_devices('GPU')
 
 def train_and_eval(run_config, train_input_fn, eval_input_fn):
     tf.config.optimizer.set_experimental_options({"auto_mixed_precision": run_config.amp})
