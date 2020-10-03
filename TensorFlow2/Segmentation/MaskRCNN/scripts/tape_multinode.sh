@@ -22,11 +22,12 @@ GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
 STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
-FIRST_DECAY=$(( 12 * STEP_PER_EPOCH ))
-SECOND_DECAY=$(( 15 * STEP_PER_EPOCH ))
-TOTAL_STEPS=$(( 18 * STEP_PER_EPOCH ))
-LR_MULTIPLIER=0.0009
+FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
+SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
+TOTAL_STEPS=$(( 13 * STEP_PER_EPOCH ))
+LR_MULTIPLIER=0.001
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
+WARMUP_STEPS=$(( 4 * STEP_PER_EPOCH ))
 
 source activate mask_rcnn
 
@@ -53,7 +54,7 @@ mkdir -p $BASEDIR/../results_tape_1x
         --model_dir="$BASEDIR/../results_tape_1x" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1800 \
+        --warmup_steps=$WARMUP_STEPS \
         --global_gradient_clip_ratio=5.0 \
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
