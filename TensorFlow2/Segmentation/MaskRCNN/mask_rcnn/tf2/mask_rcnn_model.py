@@ -29,6 +29,7 @@ import numpy as np
 import multiprocessing
 from statistics import mean
 import threading
+from collections import defaultdict
 from math import ceil
 from mpi4py import MPI
 from tqdm import tqdm
@@ -938,6 +939,8 @@ class TapeModel(object):
             else:
                 b_w, b_o = False, False
             features, labels = next(self.train_tdf)
+            b_w = tf.convert_to_tensor(b_w)
+            b_o = tf.convert_to_tensor(b_o)
             loss_dict = self.train_step(features, labels, b_w, b_o)
             if MPI_rank()==0:
                 loss_history.append(loss_dict['total_loss'].numpy())
@@ -975,23 +978,33 @@ class TapeModel(object):
         _preds = copy.deepcopy(worker_predictions)
         for k, v in _preds.items():
             _preds[k] = np.concatenate(v, axis=0)
-        if MPI_rank() < 32:
-            converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
-            worker_source_ids = _preds['source_id']
-        else:
-            converted_predictions = []
-            worker_source_ids = []
+        # if MPI_rank() < 32:
+        # converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+        converted_predictions = coco.load_predictions2(_preds, include_mask=True, is_image_mask=False)
+        # worker_source_ids = _preds['source_id']
+        worker_source_ids = list(converted_predictions.keys())
+        # else:
+        #     converted_predictions = defaultdict(list)
+        #     worker_source_ids = []
         MPI.COMM_WORLD.barrier()
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
-        source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
+        # source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
         if MPI_rank() == 0:
-            all_predictions = []
+            '''all_predictions = []
             source_ids = []
             for i, p in enumerate(predictions_list):
                 all_predictions.extend(p)
             for i, s in enumerate(source_ids_list):
-                source_ids.extend(s)
+                source_ids.extend(s)'''
+            all_predictions = dict()
+            source_ids = []
+            for i, p in enumerate(predictions_list):
+                for a_key, a_value in p.items():
+                    if a_key not in source_ids:
+                        source_ids.append(a_key)
+                        all_predictions.extend(a_value)
+            logging.info("{} images in detection results".format(len(source_ids)))
             if use_ext:
                 args = [all_predictions, validation_json_file]
                 if async_eval:
