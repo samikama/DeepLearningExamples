@@ -36,7 +36,7 @@ from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 from mask_rcnn.utils.distributed_utils import MPI_local_rank
 from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_size
 
-from mask_rcnn.hooks.logging_hook import AutoLoggingHook
+from mask_rcnn.hooks.logging_hook import AutoLoggingHook, RuntimeNVTXHook
 
 from mask_rcnn.utils.lazy_imports import LazyImport
 hvd = LazyImport("horovod.tensorflow")
@@ -292,14 +292,15 @@ class BaseExecuter(object):
     train_run_config = self.build_strategy_configuration('train')
     train_params = self.build_model_parameters('train')
     train_estimator = self.build_mask_rcnn_estimator(train_params, train_run_config, 'train')
-
-    train_estimator.train(
-        input_fn=train_input_fn,
-        max_steps=self._runtime_config.total_steps,
-        hooks=get_training_hooks(
+    hooks=get_training_hooks(
             mode="train",
             runtime_config=self._runtime_config,
         )
+    #hooks.append(RuntimeNVTXHook(warmup_steps=self._runtime_config.warmup_steps,is_training=True))
+    train_estimator.train(
+        input_fn=train_input_fn,
+        max_steps=self._runtime_config.total_steps,
+        hooks=hooks
     )
 
     if not run_eval_after_train:
@@ -330,7 +331,7 @@ class BaseExecuter(object):
                 self._runtime_config.val_json_file,
                 report_frequency=self._runtime_config.report_frequency,
                 async_eval=self._runtime_config.async_eval,
-                use_ext=self._runtime_config.use_ext
+                use_ext=self._runtime_config.use_ext , hooks=[RuntimeNVTXHook(0,False)]
             )
     else:
         if eval_estimator is None:
@@ -351,7 +352,8 @@ class BaseExecuter(object):
             self._runtime_config.val_json_file,
             report_frequency=self._runtime_config.report_frequency,
             do_distributed=True,
-            latest_ckpt=last_ckpt
+            latest_ckpt=last_ckpt,
+            hooks=[RuntimeNVTXHook(0,False)]
         )
         pending_eval_threads.append(async_eval_thread)
 
@@ -417,6 +419,7 @@ class BaseExecuter(object):
         mode="train",
         runtime_config=self._runtime_config
     )
+    training_hooks.append(RuntimeNVTXHook(warmup_steps=self._runtime_config.warmup_steps,is_training=True))
 
     pending_eval_threads = []
     for cycle in range(1, num_cycles + 1):
@@ -484,7 +487,8 @@ class BaseExecuter(object):
                   self._runtime_config.eval_batch_size,
                   self._runtime_config.include_mask,
                   self._runtime_config.val_json_file,
-                  report_frequency=self._runtime_config.report_frequency
+                  report_frequency=self._runtime_config.report_frequency,
+                  hooks=[RuntimeNVTXHook(0,False)]
               )
       else:
           if eval_estimator is None:
@@ -505,7 +509,8 @@ class BaseExecuter(object):
               self._runtime_config.val_json_file,
               report_frequency=self._runtime_config.report_frequency,
               do_distributed=True,
-              latest_ckpt=last_ckpt
+              latest_ckpt=last_ckpt,
+              hooks=[RuntimeNVTXHook(0,False)]
           )
           pending_eval_threads.append(async_eval_thread)
 
@@ -557,7 +562,8 @@ class BaseExecuter(object):
         self._runtime_config.eval_samples,
         self._runtime_config.eval_batch_size,
         self._runtime_config.include_mask,
-        self._runtime_config.val_json_file
+        self._runtime_config.val_json_file,
+        hooks=[RuntimeNVTXHook(0,False)]
     )
 
     self._write_summary(output_dir, eval_results, predictions, current_step)

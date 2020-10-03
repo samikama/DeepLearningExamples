@@ -34,7 +34,7 @@ from mpi4py import MPI
 from tqdm import tqdm
 
 import tensorflow as tf
-import tensorflow_addons as tfa
+#import tensorflow_addons as tfa
 from tensorflow.core.protobuf import rewriter_config_pb2
 from mask_rcnn import anchors
 

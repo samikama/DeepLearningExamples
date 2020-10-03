@@ -15,33 +15,27 @@
 
 
 HOST_COUNT=1
-GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
+GPU_COUNT=1
 BATCH_SIZE=1
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
 STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
 FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
 SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
-TOTAL_STEPS=${TOTAL_STEPS:-$(( 13 * STEP_PER_EPOCH ))}
+FULL_RUN=$(( 13 * STEP_PER_EPOCH ))
+TOTAL_STEPS=${TOTAL_STEPS:-${FULL_RUN}}
 DATA_PATH=${DATA_PATH:-"/data/coco/coco-2017"}
-
+VISIBLE_GPU=${USING_GPU:-1}
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../baseline_1x
 mkdir -p $BASEDIR/../baseline_1x
-/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
-    --mca btl_tcp_if_exclude lo,docker0 \
-    -np $GPU_COUNT -H localhost:$GPU_COUNT \
-    -x NCCL_DEBUG=VERSION \
-    -x LD_LIBRARY_PATH \
-    -x PATH \
-    --oversubscribe \
-    python ${BASEDIR}/../mask_rcnn_main.py \
+CUDA_VISIBLE_DEVICES="${VISIBLE_GPU}" python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train" \
         --eval_after_training=0 \
         --checkpoint="${BASEDIR}/../weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
-        --log_interval=100 \
+        --log_interval=100000 \
         --init_learning_rate=0.04 \
         --learning_rate_steps="${FIRST_DECAY},${SECOND_DECAY}" \
         --optimizer_type="SGD" \
