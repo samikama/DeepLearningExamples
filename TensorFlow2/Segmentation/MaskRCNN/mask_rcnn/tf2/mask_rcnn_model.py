@@ -989,11 +989,9 @@ class TapeModel(object):
             all_predictions = []
             source_ids = []
             for i, p in enumerate(predictions_list):
-                if i < 32:
-                    all_predictions.extend(p)
+                all_predictions.extend(p)
             for i, s in enumerate(source_ids_list):
-                if i < 32:
-                    source_ids.extend(s)
+                source_ids.extend(s)
             if use_ext:
                 args = [all_predictions, validation_json_file]
                 if async_eval:

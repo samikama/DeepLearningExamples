@@ -22,10 +22,10 @@ GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
 STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
-FIRST_DECAY=$(( 9 * STEP_PER_EPOCH ))
-SECOND_DECAY=$(( 12 * STEP_PER_EPOCH ))
-TOTAL_STEPS=$(( 15 * STEP_PER_EPOCH ))
-LR_MULTIPLIER=0.001
+FIRST_DECAY=$(( 12 * STEP_PER_EPOCH ))
+SECOND_DECAY=$(( 15 * STEP_PER_EPOCH ))
+TOTAL_STEPS=$(( 18 * STEP_PER_EPOCH ))
+LR_MULTIPLIER=0.0009
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
 source activate mask_rcnn
@@ -53,7 +53,7 @@ mkdir -p $BASEDIR/../results_tape_1x
         --model_dir="$BASEDIR/../results_tape_1x" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1500 \
+        --warmup_steps=1800 \
         --global_gradient_clip_ratio=5.0 \
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
@@ -67,4 +67,5 @@ mkdir -p $BASEDIR/../results_tape_1x
         --xla \
         --use_batched_nms \
         --async_eval \
+        --use_ext \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_tape_1x/results_tape_1x.log
