@@ -13,38 +13,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-BATCH_SIZE=4
+BATCH_SIZE=1
 HOST_COUNT=1
 GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
+NUM_GPUS=${NUM_GPUS:-${GPU_COUNT}}
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
-STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
+STEP_PER_EPOCH=${STEPS_PER_EPOCH:-$(( IMAGES / GLOBAL_BATCH_SIZE ))}
 FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
 SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
-TOTAL_STEPS=$(( 13 * STEP_PER_EPOCH ))
+TOTAL_STEPS=${TOTAL_STEPS:-$(( 13 * STEP_PER_EPOCH ))}
+DATA_PATH=${DATA_PATH:-"/data/coco/coco-2017"}
 LR_MULTIPLIER=0.001
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
-
-conda_path=/shared/conda2
-source $conda_path/etc/profile.d/conda.sh
-conda activate base
-
-
+DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
+WITH_XLA=${WITH_XLA:-1}
+PRECALC_DATASET=${PRECALC_DATASET:-1}
+EVAL_AFTER=${EVAL_AFTER:-0}
+ASYNC_EVAL=${ASYNC_EVAL:-0}
+USE_NVCOCO=${USE_NVCOCO:-1}
+TRAIN_MODE=${TRAIN_MODE:-"train"}
+#source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../baseline_1x
-mkdir -p $BASEDIR/../baseline_1x
-/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
+#PROFILE_PATH="--profile_path ${BASEDIR}/../Profiles/TapeSingleHost"
+if "x${TRAIN_MODE}" -ne "xeval" 
+then
+    rm -rf $BASEDIR/../baseline_1x_tape
+    mkdir -p $BASEDIR/../baseline_1x_tape
+fi
+/opt/amazon/openmpi/bin/mpirun --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    -np $GPU_COUNT -H localhost:$GPU_COUNT \
+    -np ${NUM_GPUS} -H localhost:${NUM_GPUS} \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
-    /shared/conda2/bin/python ${BASEDIR}/../mask_rcnn_main.py \
-        --mode="train_and_eval" \
-	--loop_mode="tape" \
-        --checkpoint="/shared/DeepLearningExamples.ben/TensorFlow2/Segmentation/MaskRCNN/weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+    --bind-to none \
+    python  ${BASEDIR}/bind_launch.py  --direct_launch=${DIRECT_LAUNCH} --nproc_per_node=${NUM_GPUS} --nsockets_per_node=2 --ncores_per_socket=24 ${BASEDIR}/../mask_rcnn_main.py \
+        --mode=${TRAIN_MODE} \
+        --loop_mode="tape" \
+        --eval_after_training=${EVAL_AFTER} \
+        --checkpoint="${BASEDIR}/../weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --loop_mode="tape" \
 	--box_loss_type="giou" \
@@ -53,22 +63,25 @@ mkdir -p $BASEDIR/../baseline_1x
         --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../baseline_1x" \
+        --model_dir="$BASEDIR/../baseline_1x_tape" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1000 \
+        --warmup_steps=1800 \
         --global_gradient_clip_ratio=0.0 \
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
         --train_batch_size=$BATCH_SIZE \
-        --eval_batch_size=1 \
+        --eval_batch_size=8 \
         --dist_eval \
-	--first_eval=1 \
-        --training_file_pattern="/shared/data2/train*.tfrecord" \
-        --validation_file_pattern="/shared/data2/val*.tfrecord" \
-        --val_json_file="/shared/data2/annotations/instances_val2017.json" \
+        --training_file_pattern="${DATA_PATH}/precalc_masks/train*.tfrecord" \
+        --validation_file_pattern="${DATA_PATH}/nv_coco/val*.tfrecord" \
+        --val_json_file="${DATA_PATH}/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
-        --xla \
+        --xla=${WITH_XLA} \
         --tf2 \
+        --async_eval=${ASYNC_EVAL} \
+        --use_ext=${USE_NVCOCO} \
+        ${PROFILE_PATH} \
+        --preprocessed_data=${PRECALC_DATASET} \
         --use_custom_box_proposals_op | tee $BASEDIR/../baseline_1x/baseline_1x.log

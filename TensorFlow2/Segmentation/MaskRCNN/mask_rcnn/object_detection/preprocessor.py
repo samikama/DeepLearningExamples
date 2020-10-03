@@ -116,6 +116,7 @@ def keypoint_flip_horizontal(keypoints, flip_point, flip_permutation,
 def random_horizontal_flip(image,
                            boxes=None,
                            masks=None,
+                           precached_masks=None,
                            keypoints=None,
                            keypoint_flip_permutation=None,
                            seed=None):
@@ -183,10 +184,16 @@ def random_horizontal_flip(image,
     result.append(boxes)
 
   # flip masks
+
   if masks is not None:
     masks = tf.cond(pred=do_a_flip_random, true_fn=lambda: _flip_masks_left_right(masks),
                     false_fn=lambda: masks)
     result.append(masks)
+  if precached_masks is not None:
+    precached,fprecaches=tf.split(precached_masks,num_or_size_splits=2)
+    precached_masks = tf.cond(pred=do_a_flip_random, true_fn=lambda: fprecaches,
+                    false_fn=lambda: precached)
+  result.append(precached_masks)
 
   # flip keypoints
   if keypoints is not None and keypoint_flip_permutation is not None:

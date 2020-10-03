@@ -53,7 +53,7 @@ def normalize_image(image):
     return normalized_image
 
 
-def random_horizontal_flip(image, boxes=None, masks=None, seed=None):
+def random_horizontal_flip(image, boxes=None, masks=None, precached_masks=None, seed=None):
     """Random horizontal flip the image, boxes, and masks.
 
     Args:
@@ -69,7 +69,7 @@ def random_horizontal_flip(image, boxes=None, masks=None, seed=None):
     boxes: None or the processed box tensor after being randomly flipped.
     masks: None or the processed mask tensor after being randomly flipped.
     """
-    return preprocessor.random_horizontal_flip(image, boxes, masks, seed=seed)
+    return preprocessor.random_horizontal_flip(image, boxes, masks, precached_masks=precached_masks,seed=seed)
 
 
 def resize_and_pad(image, target_size, stride, boxes=None, masks=None):

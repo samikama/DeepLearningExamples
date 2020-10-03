@@ -18,10 +18,10 @@
 import copy
 import operator
 import time
-
+import os
 import numpy as np
 import tensorflow as tf
-
+from tensorflow.python import _pywrap_nvtx as nvtx
 from distutils.version import LooseVersion
 
 from mask_rcnn.utils.logging_formatter import logging
@@ -53,8 +53,112 @@ from mask_rcnn.utils.lazy_imports import LazyImport
 
 #hvd = LazyImport("horovod.tensorflow")
 
-__all__ = ["AutoLoggingHook"]
+__all__ = ["AutoLoggingHook","RuntimeNVTXHook"]
 
+
+@atexit_hook
+class _RuntimeNVTXHook(tf.estimator.SessionRunHook):
+
+    def __init__(self, warmup_steps=500, is_training=True):
+        """
+        AutoLogging Hook for Tensorflow
+
+        :param warmup_steps: integers, numbers of steps considered as warmup
+        :param is_training: boolean
+        """
+
+        self._initialized = False
+        self._current_step = None
+        self._warmup_steps = warmup_steps
+        self._session_token=None
+        self._step_token=None
+        self._training=is_training
+        self._event_times=[]
+        self._event_start=None
+    def __atexit__(self):
+        times=np.asarray(self._event_times,dtype=np.float64)
+        np.savez(f"times_{os.getpid()}.npz",step_times=times)
+        pass
+    def begin(self):
+        """Called once before using the session.
+        When called, the default graph is the one that will be launched in the
+        session.  The hook can modify the graph by adding new operations to it.
+        After the `begin()` call the graph will be finalized and the other callbacks
+        can not modify the graph anymore. Second call of `begin()` on the same
+        graph, should not change the graph.
+        """
+        self._session_token=nvtx.push("Run Start","Train" if self._training else "Eval")
+        pass
+
+    def end(self, session):  # pylint: disable=unused-argument
+        """Called at the end of session.
+        The `session` argument can be used in case the hook wants to run final ops,
+        such as saving a last checkpoint.
+        If `session.run()` raises exception other than OutOfRangeError or
+        StopIteration then `end()` is not called.
+        Note the difference between `end()` and `after_run()` behavior when
+        `session.run()` raises OutOfRangeError or StopIteration. In that case
+        `end()` is called but `after_run()` is not called.
+        Args:
+          session: A TensorFlow Session that will be soon closed.
+        """
+
+        nvtx.pop(self._session_token)
+
+    def after_create_session(self, session, coord):  # pylint: disable=unused-argument3
+        """Called when new TensorFlow session is created.
+        This is called to signal the hooks that a new session has been created. This
+        has two essential differences with the situation in which `begin` is called:
+        * When this is called, the graph is finalized and ops can no longer be added
+            to the graph.
+        * This method will also be called as a result of recovering a wrapped
+            session, not only at the beginning of the overall session.
+        Args:
+          session: A TensorFlow Session that has been created.
+          coord: A Coordinator object which keeps track of all threads.
+        """
+
+        # ========= Collect the number of GPUs ======== #
+        self._initialized= True
+        self._current_step=0
+    def before_run(self, run_context):  # pylint: disable=unused-argument
+        """Called before each call to run().
+        You can return from this call a `SessionRunArgs` object indicating ops or
+        tensors to add to the upcoming `run()` call.  These ops/tensors will be run
+        together with the ops/tensors originally passed to the original run() call.
+        The run args you return can also contain feeds to be added to the run()
+        call.
+        The `run_context` argument is a `SessionRunContext` that provides
+        information about the upcoming `run()` call: the originally requested
+        op/tensors, the TensorFlow Session.
+        At this point graph is finalized and you can not add ops.
+        Args:
+          run_context: A `SessionRunContext` object.
+        Returns:
+          None or a `SessionRunArgs` object.
+        """
+        if self._training:
+            runtype="TrainStep"
+        else:
+            runtype="EvalStep"
+        self._step_token=nvtx.push(f"{runtype}-{self._current_step}",runtype)
+        self._current_step += 1
+        self._event_start=time.perf_counter()
+        return None
+
+    def after_run(self, run_context, run_values):  # pylint: disable=unused-argument
+        """Called after each call to run().
+        The `run_values` argument contains results of requested ops/tensors by
+        `before_run()`.
+        The `run_context` argument is the same one send to `before_run` call.
+        `run_context.request_stop()` can be called to stop the iteration.
+        If `session.run()` raises any exceptions then `after_run()` is not called.
+        Args:
+          run_context: A `SessionRunContext` object.
+          run_values: A SessionRunValues object.
+        """
+        self._event_times.append(time.perf_counter()-self._event_start)
+        nvtx.pop(self._step_token)
 
 @atexit_hook
 class _AutoLoggingHook(tf.estimator.SessionRunHook):
@@ -524,3 +628,4 @@ def setup_tensorflow_hook(sess, logging_proxy, is_training, is_initialized):
 
 
 AutoLoggingHook = lambda *args, **kwargs: real_autologging_hook(*args, **kwargs)
+RuntimeNVTXHook = lambda *args, **kwargs: _RuntimeNVTXHook(*args, **kwargs)

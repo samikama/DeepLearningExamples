@@ -22,7 +22,7 @@ from __future__ import division
 from __future__ import print_function
 import functools
 import tensorflow as tf
-import tensorflow_addons as tfa
+#import tensorflow_addons as tfa
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.keras import backend
 
