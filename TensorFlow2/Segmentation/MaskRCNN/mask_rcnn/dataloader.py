@@ -101,7 +101,7 @@ class InputReader(object):
         #simpler pipeline.
         #################################################
         
-        if do_dist_eval and n_gpus>32 and \
+        '''if do_dist_eval and n_gpus>32 and \
             (self._mode == tf.estimator.ModeKeys.PREDICT or \
              self._mode == tf.estimator.ModeKeys.EVAL):
             files = glob.glob(self._file_pattern)
@@ -113,7 +113,7 @@ class InputReader(object):
             dataset = dataset.batch(batch_size=batch_size,drop_remainder=False)
             dataset = dataset.repeat()
             dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-            return dataset
+            return dataset'''
 
         ##################################################
 
