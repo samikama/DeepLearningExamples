@@ -1021,6 +1021,7 @@ class TapeModel(object):
                         source_ids.append(a_key)
                         all_predictions.extend(a_value)'''
             logging.info("{} images in detection results".format(len(source_ids)))
+            logging.info("{} unique images in detection results".format(len(set(source_ids))))
             if use_ext:
                 args = [all_predictions, validation_json_file]
                 if async_eval:
