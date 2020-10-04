@@ -47,6 +47,7 @@ from mask_rcnn import distributed_executer
 from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
 from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
 from mask_rcnn import session_executor
+from mask_rcnn import tape_executor
 
 from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn.hyperparameters import params_io
@@ -84,6 +85,9 @@ def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
         
 def run_session(runtime_config, train_input_fn, eval_input_fn):
     session_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
+
+def run_tape(runtime_config, train_input_fn, eval_input_fn):
+    tape_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
 
 def main(argv):
     del argv  # Unused.
@@ -167,7 +171,8 @@ def main(argv):
         run_executer(RUN_CONFIG, train_input_fn, eval_input_fn)
     elif RUN_CONFIG.loop_mode=='session':
         run_session(RUN_CONFIG, train_input_fn, eval_input_fn)
-
+    elif RUN_CONFIG.loop_mode=='tape':
+        run_tape(RUN_CONFIG, train_input_fn, eval_input_fn)
 
 if __name__ == '__main__':
     logging.set_verbosity(logging.INFO)

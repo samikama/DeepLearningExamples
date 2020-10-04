@@ -13,15 +13,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Batch size per gpu 4 on arbitrary number of nodes
+# as specified in hosts file
+
+BATCH_SIZE=1
+HOST_COUNT=`wc -l < ~/hosts`
+GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
+IMAGES=118287
+GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
+STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
+FIRST_DECAY=$(( 12 * STEP_PER_EPOCH ))
+SECOND_DECAY=$(( 16 * STEP_PER_EPOCH ))
+TOTAL_STEPS=$(( 19 * STEP_PER_EPOCH ))
+LR_MULTIPLIER=0.001
+BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
+
 source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../results_32x
-mkdir -p $BASEDIR/../results_32x
+rm -rf $BASEDIR/../results_estimator_1x
+mkdir -p $BASEDIR/../results_estimator_1x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     --hostfile ~/hosts \
-    -N 8 \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
@@ -30,29 +44,26 @@ mkdir -p $BASEDIR/../results_32x
         --mode="train_and_eval" \
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
-        --log_interval=10 \
-        --init_learning_rate=0.24 \
-        --learning_rate_steps="5625,7500" \
+        --log_interval=100 \
+        --init_learning_rate=$BASE_LR \
+        --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../results_32x" \
-        --num_steps_per_eval=462 \
-        --first_eval=10 \
+        --model_dir="$BASEDIR/../results_estimator_1x" \
+        --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1800 \
+        --warmup_steps=1500 \
         --global_gradient_clip_ratio=5.0 \
-        --total_steps=40000 \
+        --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
-        --train_batch_size=1 \
+        --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
         --training_file_pattern="/home/ubuntu/data/nv_coco/train*.tfrecord" \
         --validation_file_pattern="/home/ubuntu/data/nv_coco/val*.tfrecord" \
         --val_json_file="/home/ubuntu/data/annotations/instances_val2017.json" \
         --amp \
-        --use_batched_nms \
         --xla \
+        --use_batched_nms \
         --async_eval \
-        --use_ext \
-        --use_custom_box_proposals_op | tee $BASEDIR/../results_32x/run_32x.log
-
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_estimator_1x/results_estimator_1x.log

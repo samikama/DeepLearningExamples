@@ -22,7 +22,7 @@ model architecture, loss function, learning rate schedule, and evaluation
 procedure.
 
 """
-
+import time
 import itertools
 import copy
 import numpy as np
@@ -640,9 +640,11 @@ class SessionModel(object):
                  is_training=True, **kwargs):
         self.run_config = run_config
         self.forward = MRCNN(run_config.values(), is_training=True, **kwargs)
-        self.train_tdf = tf.compat.v1.data.make_initializable_iterator(train_input_fn(run_config.values())) \
+        train_params = dict(run_config.values(), batch_size=run_config.train_batch_size)
+        self.train_tdf = tf.compat.v1.data.make_initializable_iterator(train_input_fn(train_params)) \
                             if train_input_fn else None
-        self.eval_tdf = tf.compat.v1.data.make_initializable_iterator(eval_input_fn(run_config.values())) \
+        eval_params = dict(run_config.values(), batch_size=run_config.eval_batch_size)
+        self.eval_tdf = tf.compat.v1.data.make_initializable_iterator(eval_input_fn(eval_params)) \
                             if eval_input_fn else None
         self.train_step = self.train_fn()
         self.eval_step = self.eval_fn()
@@ -821,9 +823,11 @@ class TapeModel(object):
     def __init__(self, params, train_input_fn=None, eval_input_fn=None, is_training=True):
         self.params = params
         self.forward = MRCNN(self.params.values(), is_training=is_training)
-        self.train_tdf = iter(train_input_fn(self.params.values())) \
+        train_params = dict(self.params.values(), batch_size=self.params.train_batch_size)
+        self.train_tdf = iter(train_input_fn(train_params)) \
                             if train_input_fn else None
-        self.eval_tdf = iter(eval_input_fn(self.params.values())) \
+        eval_params = dict(self.params.values(), batch_size=self.params.eval_batch_size)
+        self.eval_tdf = iter(eval_input_fn(eval_params).repeat()) \
                             if eval_input_fn else None
         self.optimizer, self.schedule = self.get_optimizer()
     
@@ -926,6 +930,8 @@ class TapeModel(object):
             loss_history = []
         else:
             p_bar = range(steps)
+
+        timings=[]
         for i in p_bar:
             if broadcast and i==0:
                 b_w, b_o = True, True
@@ -933,14 +939,22 @@ class TapeModel(object):
                 b_w, b_o = False, True
             else:
                 b_w, b_o = False, False
+            
+            tstart = time.perf_counter()
             features, labels = next(self.train_tdf)
             loss_dict = self.train_step(features, labels, b_w, b_o)
+            delta_t = time.perf_counter() - tstart
+            timings.append(delta_t)
             if MPI_rank()==0:
                 loss_history.append(loss_dict['total_loss'].numpy())
                 step = self.optimizer.iterations
                 learning_rate = self.schedule(step)
                 p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
                                                                           learning_rate))
+            if i%500 == 0:
+                timings = np.asarray(timings, np.float)
+                print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
+                timings = []
     @tf.function            
     def predict(self, features):
         labels = None

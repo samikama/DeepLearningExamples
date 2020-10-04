@@ -1,7 +1,7 @@
 import os
 import sys
 from math import ceil
-
+import time
 os.environ['CUDA_CACHE_DISABLE'] = '0'
 os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
 os.environ['TF_ADJUST_HUE_FUSED'] = '1'

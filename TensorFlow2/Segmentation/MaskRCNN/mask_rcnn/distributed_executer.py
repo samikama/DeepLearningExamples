@@ -75,7 +75,7 @@ def get_training_hooks(mode, runtime_config): # model_dir, checkpoint_path=None,
     if MPI_is_distributed() and mode == "train":
         training_hooks.append(hvd.BroadcastGlobalVariablesHook(root_rank=0))
 
-    if not MPI_is_distributed() or MPI_local_rank() == 0:
+    if not MPI_is_distributed() or MPI_rank() == 0:
         training_hooks.append(CheckpointSaverHook(
             checkpoint_dir=model_dir,
             checkpoint_basename="model.ckpt"

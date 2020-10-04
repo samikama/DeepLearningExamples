@@ -40,9 +40,10 @@ from mask_rcnn import distributed_executer
 from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
 from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
 from mask_rcnn import session_executor
+from mask_rcnn import tape_executor
 from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn.hyperparameters import params_io
-
+from mask_rcnn.tf2.mask_rcnn_model import TapeModel
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
 
 from mask_rcnn.utils.logging_formatter import log_cleaning
@@ -73,7 +74,9 @@ from mask_rcnn.training import losses, learning_rates
 from mask_rcnn import coco_metric
 from mask_rcnn.utils import coco_utils
 
+import h5py
 import time
+import multiprocessing
 
 def run_eval(model, sess, steps, params, async_eval=True, use_ext=True):
     print("Starting run_eval fn")
@@ -133,16 +136,17 @@ def run_eval(model, sess, steps, params, async_eval=True, use_ext=True):
                 evaluation.compute_coco_eval_metric_n(*args)
 
 
-def get_latest_checkpoint(q, checkpoint_dir):
+def get_latest_checkpoint(q, checkpoint_dir, model):
     encountered_checkpoints = set() 
     while True:
-        latest=tf.train.latest_checkpoint(checkpoint_dir)
+        latest=model.get_latest_checkpoint()
         if (latest is not None) and (len(q) == 0 or q[-1] != latest) and (latest not in encountered_checkpoints):
             q.append(latest)
             encountered_checkpoints.add(latest)
         time.sleep(1)
 
-def do_eval(run_config, train_input_fn, eval_input_fn):
+
+def do_eval_old(run_config, train_input_fn, eval_input_fn):
     model = SessionModel(run_config, train_input_fn, eval_input_fn)
     hooks = [hvd.BroadcastGlobalVariablesHook(0)]
     out_path = '/home/ubuntu/fsx/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_session_1x/'
@@ -169,7 +173,7 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
             time.sleep(5)    
 
 
-'''
+
     q = deque()
     
     args=[q, out_path]
@@ -192,7 +196,63 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
             print("No new checkpoint to evaluate")
             print(len(q))
             time.sleep(2)
+
+
+
+def do_eval(run_config, train_input_fn, eval_input_fn):
+
+    mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn, is_training=True)
+    mrcnn_model.initialize_model()
+
+    q = deque()
+    out_path = run_config.model_dir
+    args=[q, out_path, mrcnn_model]
+    eval_workers=min(32, MPI_size())
+    #if MPI_rank() == 0:
+    chkpoint_thread = threading.Thread(target=get_latest_checkpoint, name="checkpoint thread", args=args)
+    chkpoint_thread.start()
+    last = None
+    test = True
+    while True:
+        print("Size of queue is", len(q))
+        if len(q) == 0 or q[0] == last:
+            pass
+        if len(q) !=0 and q[0] != last:
+            last = q[0]
+            q.popleft()
+            print("#"*20, "Running eval for", last)
+            mrcnn_model.load_model(os.path.join(run_config.model_dir,last))
+            mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval,
+                     use_ext=run_config.use_ext)
+        #else:
+        time.sleep(5)
+    '''
+    eval_workers=min(32, MPI_size())
+    filename="test_wa.h5"
+    file=h5py.File(filename,'r')
+    weights = []
+    for i in range(len(file.keys())):
+        weights.append(file['weight'+str(i)][:])
+    
+    print("STARTING FOR FIRST TIME")
+    mrcnn_model.forward.set_weights(weights)
+    
+    args = [run_config.eval_samples//eval_workers, run_config.async_eval,
+                         run_config.use_ext]
+
+    #eval_process = multiprocessing.Process(target=mrcnn_model.run_eval, name="eval process", args=args)
+    mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval,
+                         use_ext=run_config.use_ext)
+    #eval_process.start()
+    #time.sleep(30)
+    #print("STARTING FOR SECOND TIME")
+    #mrcnn_model.forward.set_weights(weights)
+    #eval_process2 = multiprocessing.Process(target=mrcnn_model.run_eval, name="eval process2", args=args)
+    #mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval,
+    #                     use_ext=run_config.use_ext)
+    #eval_process2.start()
 '''
+
 def main(argv):
     del argv  # Unused.
 
