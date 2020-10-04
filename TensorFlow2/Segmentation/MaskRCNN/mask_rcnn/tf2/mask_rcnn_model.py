@@ -32,7 +32,9 @@ import threading
 from math import ceil
 from mpi4py import MPI
 from tqdm import tqdm
+import os
 
+import h5py
 import tensorflow as tf
 import tensorflow_addons as tfa
 from tensorflow.core.protobuf import rewriter_config_pb2
@@ -65,7 +67,7 @@ from mask_rcnn.tf2.utils import warmup_scheduler, eager_mapping
 from mask_rcnn.utils.meters import StandardMeter
 from mask_rcnn.utils.metric_tracking import register_metric
 
-hvd = LazyImport("horovod.tensorflow")
+
 
 MODELS = dict()
 
@@ -822,7 +824,14 @@ class TapeModel(object):
     
     def __init__(self, params, train_input_fn=None, eval_input_fn=None, is_training=True):
         self.params = params
+
+        if self.params.run_herring:
+            import herring.tensorflow as herring
+        else:
+            hvd = LazyImport("horovod.tensorflow")
+
         self.forward = MRCNN(self.params.values(), is_training=is_training)
+        self.model_dir = self.params.model_dir
         train_params = dict(self.params.values(), batch_size=self.params.train_batch_size)
         self.train_tdf = iter(train_input_fn(train_params)) \
                             if train_input_fn else None
@@ -830,7 +839,8 @@ class TapeModel(object):
         self.eval_tdf = iter(eval_input_fn(eval_params).repeat()) \
                             if eval_input_fn else None
         self.optimizer, self.schedule = self.get_optimizer()
-    
+        self.epoch_num = 0
+
     def load_weights(self):
         chkp = tf.compat.v1.train.NewCheckpointReader(self.params.checkpoint)
         weights = [chkp.get_tensor(i) for i in eager_mapping.resnet_vars]
@@ -900,22 +910,41 @@ class TapeModel(object):
                 + loss_dict['l2_regularization_loss']
             if self.params.amp:
                 scaled_loss = self.optimizer.get_scaled_loss(loss_dict['total_loss'])
-        if MPI_is_distributed():
-            tape = hvd.DistributedGradientTape(tape, compression=hvd.compression.NoneCompressor)
-        if self.params.amp:
-            scaled_gradients = tape.gradient(scaled_loss, self.forward.trainable_variables)
-            gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
+
+        if self.params.run_herring:
+            if MPI_is_distributed(True):
+                tape = herring.DistributedGradientTape(tape)
+            if self.params.amp:
+                scaled_gradients = tape.gradient(scaled_loss, self.forward.trainable_variables)
+                gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
+            else:
+                gradients = tape.gradient(loss_dict['total_loss'], self.forward.trainable_variables)
+            self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
+            if MPI_is_distributed(True) and sync_weights:
+                if MPI_rank(True)==0:
+                    logging.info("Broadcasting variables")
+                herring.broadcast_variables(self.forward.variables, 0)
+            if MPI_is_distributed(True) and sync_opt:
+                if MPI_rank(True)==0:
+                    logging.info("Broadcasting optimizer")
+                herring.broadcast_variables(self.optimizer.variables(), 0)        
         else:
-            gradients = tape.gradient(loss_dict['total_loss'], self.forward.trainable_variables)
-        self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
-        if MPI_is_distributed() and sync_weights:
-            if MPI_rank()==0:
-                logging.info("Broadcasting variables")
-            hvd.broadcast_variables(self.forward.variables, 0)
-        if MPI_is_distributed() and sync_opt:
-            if MPI_rank()==0:
-                logging.info("Broadcasting optimizer")
-            hvd.broadcast_variables(self.optimizer.variables(), 0)
+            if MPI_is_distributed():
+                tape = hvd.DistributedGradientTape(tape, compression=hvd.compression.NoneCompressor)
+            if self.params.amp:
+                scaled_gradients = tape.gradient(scaled_loss, self.forward.trainable_variables)
+                gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
+            else:
+                gradients = tape.gradient(loss_dict['total_loss'], self.forward.trainable_variables)
+            self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
+            if MPI_is_distributed() and sync_weights:
+                if MPI_rank()==0:
+                    logging.info("Broadcasting variables")
+                hvd.broadcast_variables(self.forward.variables, 0)
+            if MPI_is_distributed() and sync_opt:
+                if MPI_rank()==0:
+                    logging.info("Broadcasting optimizer")
+                hvd.broadcast_variables(self.optimizer.variables(), 0)
         return loss_dict
     
     def initialize_model(self):
@@ -924,7 +953,7 @@ class TapeModel(object):
         self.load_weights()
     
     def train_epoch(self, steps, broadcast=False):
-        if MPI_rank()==0:
+        if MPI_rank(self.params.run_herring)==0:
             logging.info("Starting training loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             loss_history = []
@@ -943,18 +972,46 @@ class TapeModel(object):
             tstart = time.perf_counter()
             features, labels = next(self.train_tdf)
             loss_dict = self.train_step(features, labels, b_w, b_o)
+
             delta_t = time.perf_counter() - tstart
             timings.append(delta_t)
-            if MPI_rank()==0:
+            if MPI_rank(self.params.run_herring)==0:
                 loss_history.append(loss_dict['total_loss'].numpy())
                 step = self.optimizer.iterations
                 learning_rate = self.schedule(step)
                 p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
                                                                           learning_rate))
-            if i%500 == 0:
-                timings = np.asarray(timings, np.float)
-                print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
-                timings = []
+            #if i%500 == 0:
+            #    timings = np.asarray(timings, np.float)
+            #    print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
+            #    timings = []
+        if MPI_rank(self.params.run_herring) == 0:
+            print("Saving checkpoint...")
+            self.epoch_num+=1
+            self.save_model()
+            
+    def get_latest_checkpoint(self):
+        try:
+            return sorted([_ for _ in os.listdir(self.model_dir) if _.endswith(".h5")])[-1]
+        except:
+            return None
+
+    def save_model(self):
+        filename = os.path.join(self.model_dir, f'weights_{self.epoch_num:02d}.h5')
+        f = h5py.File(filename,'w')
+        weights = self.forward.get_weights()
+        for i in range(len(weights)):
+            f.create_dataset('weight'+str(i),data=weights[i])
+        f.close()
+
+    def load_model(self, filename):
+        file=h5py.File(filename,'r')
+        weights = []
+        for i in range(len(file.keys())):
+            weights.append(file['weight'+str(i)][:])
+        self.forward.set_weights(weights)
+    
+
     @tf.function            
     def predict(self, features):
         labels = None
@@ -966,7 +1023,7 @@ class TapeModel(object):
         return model_outputs
             
     def run_eval(self, steps, async_eval=False, use_ext=False):
-        if MPI_rank()==0:
+        if MPI_rank(self.params.run_herring)==0:
             logging.info("Starting eval loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         else:
@@ -985,7 +1042,7 @@ class TapeModel(object):
         _preds = copy.deepcopy(worker_predictions)
         for k, v in _preds.items():
             _preds[k] = np.concatenate(v, axis=0)
-        if MPI_rank() < 32:
+        if MPI_rank(self.params.run_herring) < 32:
             converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
             worker_source_ids = _preds['source_id']
         else:
@@ -995,7 +1052,7 @@ class TapeModel(object):
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
         source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
-        if MPI_rank() == 0:
+        if MPI_rank(self.params.run_herring) == 0:
             all_predictions = []
             source_ids = []
             for i, p in enumerate(predictions_list):

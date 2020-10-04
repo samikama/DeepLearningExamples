@@ -23,13 +23,7 @@ from __future__ import print_function
 
 import os
 
-from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
 import subprocess
-
-
-#if MPI_rank() == 0:
-#    evaluate = subprocess.Popen(['./session_eval.sh'])
-
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
@@ -43,10 +37,10 @@ from tensorflow.python.framework.ops import disable_eager_execution
 from mask_rcnn.utils.logging_formatter import logging
 
 from mask_rcnn import dataloader
-from mask_rcnn import distributed_executer
-from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
+#from mask_rcnn import distributed_executer
+#from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
 from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
-from mask_rcnn import session_executor
+#from mask_rcnn import session_executor
 from mask_rcnn import tape_executor
 
 from mask_rcnn.hyperparameters import mask_rcnn_params
@@ -59,6 +53,7 @@ import dllogger
 
 FLAGS = define_hparams_flags()
 
+from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
     mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1
@@ -113,6 +108,18 @@ def main(argv):
     
     # ============================ Configure parameters ============================ #
 
+
+    if RUN_CONFIG.run_herring:
+        try:
+            import herring.tensorflow as herring
+            herring.init()
+            gpus = tf.config.list_physical_devices('GPU')
+            if gpus:
+                tf.config.set_visible_devices(gpus[herring.local_rank()], 'GPU')
+
+        except:
+            raise ImportError("Unable to import Herring. Are you sure you're running with herringrun?")
+    
     if RUN_CONFIG.use_tf_distributed and MPI_is_distributed():
         raise RuntimeError("Incompatible Runtime. Impossible to use `--use_tf_distributed` with MPIRun Horovod")
 

@@ -43,7 +43,9 @@ from mask_rcnn.utils.metric_tracking import TF_METRICS
 from mask_rcnn.utils.metric_tracking import KERAS_MODELS
 
 from mask_rcnn.utils.lazy_imports import LazyImport
-hvd = LazyImport("horovod.tensorflow")
+
+
+#hvd = LazyImport("horovod.tensorflow")
 
 __all__ = ["AutoLoggingHook"]
 

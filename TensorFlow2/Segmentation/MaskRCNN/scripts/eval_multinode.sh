@@ -39,9 +39,10 @@ mkdir -p $BASEDIR/../results_tape_1x
     -x LD_LIBRARY_PATH \
     -x PATH \
     -x RDMAV_FORK_SAFE=1 \
+    --bind-to none \
     --oversubscribe \
     bash launcher.sh \
-    /shared/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    /shared/conda/bin/python ${BASEDIR}/../mask_rcnn_eval.py \
         --mode="train_and_eval" \
         --checkpoint="/shared/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
@@ -52,7 +53,7 @@ mkdir -p $BASEDIR/../results_tape_1x
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../results_tape_1x" \
-        --num_steps_per_eval=100 \
+        --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1500 \
         --global_gradient_clip_ratio=5.0 \
@@ -61,7 +62,7 @@ mkdir -p $BASEDIR/../results_tape_1x
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-	--training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
+        --training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
         --validation_file_pattern="/shared/data/nv_tfrecords/val*.tfrecord" \
         --val_json_file="/shared/data/nv_tfrecords/annotations/instances_val2017.json" \
         --amp \

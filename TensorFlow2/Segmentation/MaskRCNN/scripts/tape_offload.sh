@@ -61,7 +61,49 @@ mkdir -p $BASEDIR/../results_tape_1x
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-	--training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
+        --training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
+        --validation_file_pattern="/shared/data/nv_tfrecords/val*.tfrecord" \
+        --val_json_file="/shared/data/nv_tfrecords/annotations/instances_val2017.json" \
+        --amp \
+        --xla \
+        --use_batched_nms \
+        --async_eval \
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_tape_1x/results_tape_1x.log &
+
+
+BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
+    --mca btl_tcp_if_exclude lo,docker0 \
+    --hostfile /shared/eval_hostfile \
+    -N 8 \
+    -x NCCL_DEBUG=VERSION \
+    -x LD_LIBRARY_PATH \
+    -x PATH \
+    -x RDMAV_FORK_SAFE=1 \
+    --bind-to none \
+    --oversubscribe \
+    bash launcher.sh \
+    /shared/conda/bin/python ${BASEDIR}/../mask_rcnn_eval.py \
+        --mode="train_and_eval" \
+        --checkpoint="/shared/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+        --eval_samples=5000 \
+        --loop_mode="tape" \
+        --log_interval=100 \
+        --init_learning_rate=$BASE_LR \
+        --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
+        --optimizer_type="SGD" \
+        --lr_schedule="piecewise" \
+        --model_dir="$BASEDIR/../results_tape_1x" \
+        --num_steps_per_eval=$STEP_PER_EPOCH \
+        --warmup_learning_rate=0.000133 \
+        --warmup_steps=1500 \
+        --global_gradient_clip_ratio=5.0 \
+        --total_steps=$TOTAL_STEPS \
+        --l2_weight_decay=1e-4 \
+        --train_batch_size=$BATCH_SIZE \
+        --eval_batch_size=1 \
+        --dist_eval \
+        --training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
         --validation_file_pattern="/shared/data/nv_tfrecords/val*.tfrecord" \
         --val_json_file="/shared/data/nv_tfrecords/annotations/instances_val2017.json" \
         --amp \

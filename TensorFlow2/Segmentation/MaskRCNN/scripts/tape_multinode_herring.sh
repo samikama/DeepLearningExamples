@@ -31,16 +31,8 @@ BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tape_1x
 mkdir -p $BASEDIR/../results_tape_1x
-/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
-    --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile /shared/hostfile \
-    -N 8 \
-    -x NCCL_DEBUG=VERSION \
-    -x LD_LIBRARY_PATH \
-    -x PATH \
-    -x RDMAV_FORK_SAFE=1 \
-    --oversubscribe \
-    bash launcher.sh \
+
+herringrun -n 8 --homogeneous \
     /shared/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
         --checkpoint="/shared/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
@@ -68,4 +60,5 @@ mkdir -p $BASEDIR/../results_tape_1x
         --xla \
         --use_batched_nms \
         --async_eval \
+	--run_herring \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_tape_1x/results_tape_1x.log
