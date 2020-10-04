@@ -992,7 +992,7 @@ class TapeModel(object):
             converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
             # converted_predictions = coco.load_predictions2(_preds, include_mask=True, is_image_mask=False)
             worker_source_ids = _preds['source_id']
-        # worker_source_ids = list(converted_predictions.keys())
+            # worker_source_ids = list(converted_predictions.keys())
         else:
             #converted_predictions = defaultdict(list)
             converted_predictions =[]
@@ -1001,10 +1001,10 @@ class TapeModel(object):
         if MPI_rank() == 0:
             logging.info("Gathering logs")
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
-        if MPI_rank() == 0:
-            logging.info("logs gathered")
         source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
+        if MPI_rank() == 0:
+            logging.info("logs gathered")
         if MPI_rank() == 0:
             all_predictions = []
             source_ids = []

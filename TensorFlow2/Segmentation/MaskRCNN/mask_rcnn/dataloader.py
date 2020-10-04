@@ -147,7 +147,7 @@ class InputReader(object):
             if MPI_is_distributed():
                 logging.info("Using Evaluation Dataset Sharding with Horovod")
                 _shard_idx, _num_shards = MPI_rank_and_size()
-                max_shards = min(_num_shards, 32)
+                max_shards = min(_num_shards, 256)
                 try:
                     dataset = dataset.shard(
                         num_shards=max_shards,
@@ -162,8 +162,8 @@ class InputReader(object):
 
         dataset = dataset.interleave(
             map_func=_prefetch_dataset,
-            cycle_length=32,
-            block_length=64,
+            cycle_length=4,
+            block_length=8,
             num_parallel_calls=tf.data.experimental.AUTOTUNE,
         )
 
