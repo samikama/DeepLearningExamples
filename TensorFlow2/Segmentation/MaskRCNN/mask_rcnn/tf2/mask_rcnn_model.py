@@ -988,7 +988,7 @@ class TapeModel(object):
         _preds = copy.deepcopy(worker_predictions)
         for k, v in _preds.items():
             _preds[k] = np.concatenate(v, axis=0)
-        if MPI_rank() < 256:
+        if MPI_rank() < 32:
             converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
             # converted_predictions = coco.load_predictions2(_preds, include_mask=True, is_image_mask=False)
             worker_source_ids = _preds['source_id']

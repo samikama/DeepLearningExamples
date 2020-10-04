@@ -122,51 +122,6 @@ class InputReader(object):
             shuffle=False
         )
 
-        '''if self._mode == tf.estimator.ModeKeys.TRAIN:
-
-            if input_context is not None:
-                logging.info("Using Dataset Sharding with TF Distributed")
-                _num_shards = input_context.num_input_pipelines
-                _shard_idx = input_context.input_pipeline_id
-
-            elif MPI_is_distributed():
-                logging.info("Using Dataset Sharding with Horovod")
-                _shard_idx, _num_shards = MPI_rank_and_size()
-
-            try:
-                dataset = dataset.shard(
-                    num_shards=_num_shards,
-                    index=_shard_idx
-                )
-                dataset = dataset.shuffle(math.ceil(256 / _num_shards))
-
-            except NameError:  # Not a distributed training setup
-                pass
-        elif do_dist_eval and (self._mode == tf.estimator.ModeKeys.PREDICT or self._mode == tf.estimator.ModeKeys.EVAL):
-            # 32 validation tf records - distribute on upto 32 workers
-            if MPI_is_distributed():
-                logging.info("Using Evaluation Dataset Sharding with Horovod")
-                _shard_idx, _num_shards = MPI_rank_and_size()
-                max_shards = min(_num_shards, 256)
-                try:
-                    dataset = dataset.shard(
-                        num_shards=max_shards,
-                        index=_shard_idx % max_shards
-                    )
-                except NameError:  # Not a distributed training setup
-                    pass'''
-        
-
-        def _prefetch_dataset(filename):
-            return tf.data.TFRecordDataset(filename).prefetch(1)
-
-        dataset = dataset.interleave(
-            map_func=_prefetch_dataset,
-            cycle_length=32,
-            block_length=64,
-            num_parallel_calls=tf.data.experimental.AUTOTUNE,
-        )
-        
         if self._mode == tf.estimator.ModeKeys.TRAIN:
 
             if input_context is not None:
@@ -192,7 +147,7 @@ class InputReader(object):
             if MPI_is_distributed():
                 logging.info("Using Evaluation Dataset Sharding with Horovod")
                 _shard_idx, _num_shards = MPI_rank_and_size()
-                max_shards = min(_num_shards, 256)
+                max_shards = min(_num_shards, 32)
                 try:
                     dataset = dataset.shard(
                         num_shards=max_shards,
@@ -200,6 +155,17 @@ class InputReader(object):
                     )
                 except NameError:  # Not a distributed training setup
                     pass
+        
+
+        def _prefetch_dataset(filename):
+            return tf.data.TFRecordDataset(filename).prefetch(1)
+
+        dataset = dataset.interleave(
+            map_func=_prefetch_dataset,
+            cycle_length=32,
+            block_length=64,
+            num_parallel_calls=tf.data.experimental.AUTOTUNE,
+        )
 
         if self._num_examples is not None and self._num_examples > 0:
             logging.info("[*] Limiting the amount of sample to: %d" % self._num_examples)

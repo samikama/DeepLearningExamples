@@ -29,8 +29,8 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     total_epochs = ceil(run_config.total_steps/run_config.num_steps_per_eval)
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn)
     mrcnn_model.initialize_model()
-    # eval_workers = min(MPI_size(), 32)
-    eval_workers = MPI_size()
+    eval_workers = min(MPI_size(), 32)
+    # eval_workers = MPI_size()
     for epoch in range(run_config.first_eval):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))

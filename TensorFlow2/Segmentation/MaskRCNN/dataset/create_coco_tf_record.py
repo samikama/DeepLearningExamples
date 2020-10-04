@@ -18,6 +18,13 @@
 r"""Convert raw COCO dataset to TFRecord for object_detection.
 
 Example usage:
+
+TRAIN_IMAGE_DIR=/home/ubuntu/data/raw_data/raw-data/train2017
+VAL_IMAGE_DIR=/home/ubuntu/data/raw_data/raw-data/val2017
+TEST_IMAGE_DIR=/home/ubuntu/data/raw_data/raw-data/test2017
+TRAIN_ANNOTATIONS_FILE=/home/ubuntu/data/raw_data/raw-data/annotations/
+VAL_ANNOTATIONS_FILE=/home/ubuntu/data/raw_data/raw-data/annotations/
+TESTDEV_ANNOTATIONS_FILE=/home/ubuntu/data/raw_data/raw-data/annotations/
     python create_coco_tf_record.py --logtostderr \
       --train_image_dir="${TRAIN_IMAGE_DIR}" \
       --val_image_dir="${VAL_IMAGE_DIR}" \
@@ -321,14 +328,14 @@ def main(_):
       FLAGS.train_image_dir,
       train_output_path,
       FLAGS.include_masks,
-      num_shards=256)
+      num_shards=1024)
   _create_tf_record_from_coco_annotations(
       FLAGS.val_object_annotations_file,
       FLAGS.val_caption_annotations_file,
       FLAGS.val_image_dir,
       val_output_path,
       FLAGS.include_masks,
-      num_shards=32)
+      num_shards=256)
 
 
 if __name__ == '__main__':
