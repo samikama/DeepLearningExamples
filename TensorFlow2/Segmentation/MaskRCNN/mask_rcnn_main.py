@@ -53,6 +53,9 @@ import dllogger
 FLAGS = define_hparams_flags()
 
 
+def run_tf2(run_config, train_input_fn, eval_input_fn):
+    tape_executor.train_and_eval(run_config, train_input_fn, eval_input_fn)
+
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
     mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1

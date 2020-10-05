@@ -13,19 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-source activate mask_rcnn
+source /shared/conda2/bin/activate
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tf2_32x
 mkdir -p $BASEDIR/../results_tf2_32x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile ~/hosts \
+    --hostfile /shared/hostfiles/hosts_32x \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
-    /home/ubuntu/anaconda3/envs/mask_rcnn/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    /shared/conda2/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
         --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
@@ -43,9 +43,10 @@ mkdir -p $BASEDIR/../results_tf2_32x
         --l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
-        --training_file_pattern="/home/ubuntu/data/nv_coco/train*.tfrecord" \
-        --validation_file_pattern="/home/ubuntu/data/nv_coco/val*.tfrecord" \
-        --val_json_file="/home/ubuntu/data/annotations/instances_val2017.json" \
+        --dist_eval \
+        --training_file_pattern="/shared/data2/train*.tfrecord" \
+        --validation_file_pattern="/shared/data2/val*.tfrecord" \
+        --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \

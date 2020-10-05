@@ -168,7 +168,8 @@ def define_hparams_flags():
     )
 
     flags.DEFINE_float("momentum", default=0.9, help="Optimizer Momentum")
-
+    flags.DEFINE_float("beta1", default=0.9, help="novograd b1")
+    flags.DEFINE_float("beta2", default=0.3, help="novograd b2")
     flags.DEFINE_integer('num_steps_per_eval', default=2500, help='Number of steps per evaluation epoch.')
 
     flags.DEFINE_integer('save_checkpoints_steps', default=2500, help='Save a checkpoint every N steps.')
