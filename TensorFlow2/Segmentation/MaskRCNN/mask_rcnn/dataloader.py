@@ -96,12 +96,12 @@ class InputReader(object):
             
         ##################################################
         #This style of dataset sharding currently fails
-        #With more than 32 nodes on evaluation. 
+        #With more than 32 ranks on evaluation. 
         #When MPI_size>32 and running eval, use this 
         #simpler pipeline.
         #################################################
         
-        if do_dist_eval and n_gpus>32 and \
+        '''if do_dist_eval and n_gpus>32 and \
             (self._mode == tf.estimator.ModeKeys.PREDICT or \
              self._mode == tf.estimator.ModeKeys.EVAL):
             files = glob.glob(self._file_pattern)
@@ -110,10 +110,10 @@ class InputReader(object):
             dataset = dataset.shard(_num_shards, _shard_idx)
             parser = lambda x: dataset_parser(x, self._mode, params, self._use_instance_mask, seed=seed)
             dataset = dataset.map(parser , num_parallel_calls=tf.data.experimental.AUTOTUNE)
-            dataset = dataset.batch(batch_size=batch_size,drop_remainder=True)
+            dataset = dataset.batch(batch_size=batch_size,drop_remainder=False)
             dataset = dataset.repeat()
             dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-            return dataset
+            return dataset'''
 
         ##################################################
 
