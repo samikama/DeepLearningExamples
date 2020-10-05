@@ -29,6 +29,9 @@ nsys/
 # Data Directories
 data_dir/
 
+mask-rcnn/
+resnet/
+results*/
 # Pretrained Weights Dir
 weights/mask-rcnn/1555659850/*
 weights/resnet/resnet-nhwc-2018-02-07/*

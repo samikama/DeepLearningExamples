@@ -31,7 +31,7 @@ import warnings
 
 from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
 from mask_rcnn.utils.metaclasses import SingletonMetaClass
-
+from mask_rcnn.utils.herring_env import is_herring
 __all__ = [
     "logging",
     "log_cleaning"
@@ -189,9 +189,13 @@ class _Logger(object):
         self._handlers = dict()
 
         self.old_warnings_showwarning = None
-
-        if MPI_rank_and_size()[0] == 0:
-            self._define_logger()
+        
+        if is_herring():
+            if MPI_rank_and_size(True)[0] == 0:
+                self._define_logger()
+        else:
+            if MPI_rank_and_size(False)[0] == 0:
+                self._define_logger()
 
     def _define_logger(self):
 

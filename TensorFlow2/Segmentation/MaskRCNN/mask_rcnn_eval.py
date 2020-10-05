@@ -20,10 +20,8 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
+from collections import deque
 import os
-
-import subprocess
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
@@ -33,25 +31,19 @@ from absl import app
 
 import tensorflow as tf
 from tensorflow.python.framework.ops import disable_eager_execution
-from mask_rcnn.utils.herring_env import is_herring
-
-if is_herring():
-    print("HERRING ENV IS ACTIVE")
-    import herring.tensorflow as herring
-    herring.init()
 
 from mask_rcnn.utils.logging_formatter import logging
+from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 
 from mask_rcnn import dataloader
-#from mask_rcnn import distributed_executer
-#from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
+from mask_rcnn import distributed_executer
+from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
 from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
-#from mask_rcnn import session_executor
+from mask_rcnn import session_executor
 from mask_rcnn import tape_executor
-
 from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn.hyperparameters import params_io
-
+from mask_rcnn.tf2.mask_rcnn_model import TapeModel
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
 
 from mask_rcnn.utils.logging_formatter import log_cleaning
@@ -59,36 +51,72 @@ import dllogger
 
 FLAGS = define_hparams_flags()
 
-from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
-def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
-    """Runs Mask RCNN model on distribution strategy defined by the user."""
-    mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1
-    if runtime_config.use_tf_distributed:
-        executer = distributed_executer.TFDistributedExecuter(runtime_config, mask_rcnn_model.mask_rcnn_model_fn)
-    else:
-        executer = distributed_executer.EstimatorExecuter(runtime_config, mask_rcnn_model.mask_rcnn_model_fn)
 
-    if runtime_config.mode == 'train':
-        executer.train(
-            train_input_fn=train_input_fn,
-            run_eval_after_train=FLAGS.eval_after_training,
-            eval_input_fn=eval_input_fn
-        )
+import os
+import sys
+from statistics import mean
+import copy
+import threading
+from math import ceil
 
-    elif runtime_config.mode == 'eval':
-        executer.eval(eval_input_fn=eval_input_fn)
+import numpy as np
+from tqdm import tqdm
+from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_rank, MPI_size, MPI_local_rank
+from mpi4py import MPI
+import horovod.tensorflow as hvd
+hvd.init()
 
-    elif runtime_config.mode == 'train_and_eval':
-        executer.train_and_eval(train_input_fn=train_input_fn, eval_input_fn=eval_input_fn)
+from mask_rcnn.tf2.mask_rcnn_model import SessionModel
+from mask_rcnn.hooks import pretrained_restore_hook
+from mask_rcnn import evaluation
 
-    else:
-        raise ValueError('Mode must be one of `train`, `eval`, or `train_and_eval`')
-        
-def run_session(runtime_config, train_input_fn, eval_input_fn):
-    session_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
+from mask_rcnn.training import losses, learning_rates
+from mask_rcnn import coco_metric
+from mask_rcnn.utils import coco_utils
 
-def run_tape(runtime_config, train_input_fn, eval_input_fn):
-    tape_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
+import h5py
+import time
+import multiprocessing
+
+
+
+def get_latest_checkpoint(q, checkpoint_dir, model):
+    encountered_checkpoints = set() 
+    while True:
+        latest=model.get_latest_checkpoint()
+        if (latest is not None) and (len(q) == 0 or q[-1] != latest) and (latest not in encountered_checkpoints):
+            q.append(latest)
+            encountered_checkpoints.add(latest)
+        time.sleep(1)
+
+
+
+
+def do_eval(run_config, train_input_fn, eval_input_fn):
+
+    mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn, is_training=True)
+    mrcnn_model.initialize_model()
+
+    q = deque()
+    out_path = run_config.model_dir
+    args=[q, out_path, mrcnn_model]
+    eval_workers=min(32, MPI_size())
+    #if MPI_rank() == 0:
+    chkpoint_thread = threading.Thread(target=get_latest_checkpoint, name="checkpoint thread", args=args)
+    chkpoint_thread.start()
+    last = None
+    test = True
+    while True:
+        if len(q) == 0 or q[0] == last:
+            pass
+        if len(q) !=0 and q[0] != last:
+            last = q[0]
+            q.popleft()
+            print("#"*20, "Running eval for", last)
+            mrcnn_model.load_model(os.path.join(run_config.model_dir,last))
+            mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval,
+                     use_ext=run_config.use_ext)
+        time.sleep(5)
 
 def main(argv):
     del argv  # Unused.
@@ -109,18 +137,14 @@ def main(argv):
     
     if RUN_CONFIG.loop_mode in ['estimator', 'session']:
         disable_eager_execution()
-    if RUN_CONFIG.disable_tf2_behavior:
+    if RUN_CONFIG.loop_mode=='session':
         tf.compat.v1.disable_v2_behavior()
     
     # ============================ Configure parameters ============================ #
 
-
-    
     if RUN_CONFIG.use_tf_distributed and MPI_is_distributed():
         raise RuntimeError("Incompatible Runtime. Impossible to use `--use_tf_distributed` with MPIRun Horovod")
 
-    if RUN_CONFIG.mode in ('train', 'train_and_eval') and not RUN_CONFIG.training_file_pattern:
-        raise RuntimeError('You must specify `training_file_pattern` for training.')
 
     if RUN_CONFIG.mode in ('eval', 'train_and_eval'):
         if not RUN_CONFIG.validation_file_pattern:
@@ -136,46 +160,27 @@ def main(argv):
     dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
                                                            filename=RUN_CONFIG.log_path)])
 
-    if RUN_CONFIG.mode in ('train', 'train_and_eval'):
-        
-        if RUN_CONFIG.static_data:
-            train_input_fn = static_data.FastDataLoader(RUN_CONFIG.training_file_pattern, 
-                                                        RUN_CONFIG.values())
-        else:
-            train_input_fn = dataloader.InputReader(
-                file_pattern=RUN_CONFIG.training_file_pattern,
-                mode=tf.estimator.ModeKeys.TRAIN,
-                num_examples=None,
-                use_fake_data=RUN_CONFIG.use_fake_data,
-                use_instance_mask=RUN_CONFIG.include_mask,
-                seed=RUN_CONFIG.seed,
-                disable_options=RUN_CONFIG.disable_data_options
-            )
+    eval_input_fn = dataloader.InputReader(
+        file_pattern=RUN_CONFIG.validation_file_pattern,
+        mode=tf.estimator.ModeKeys.PREDICT,
+        num_examples=RUN_CONFIG.eval_samples,
+        use_fake_data=False,
+        use_instance_mask=RUN_CONFIG.include_mask,
+        seed=RUN_CONFIG.seed,
+        disable_options=RUN_CONFIG.disable_data_options
+    )
+    
+    train_input_fn = dataloader.InputReader(
+        file_pattern=RUN_CONFIG.training_file_pattern,
+        mode=tf.estimator.ModeKeys.TRAIN,
+        num_examples=None,
+        use_fake_data=RUN_CONFIG.use_fake_data,
+        use_instance_mask=RUN_CONFIG.include_mask,
+        seed=RUN_CONFIG.seed,
+        disable_options=RUN_CONFIG.disable_data_options
+    )    
+    do_eval(RUN_CONFIG, train_input_fn, eval_input_fn)
 
-    else:
-        train_input_fn = None
-
-    if RUN_CONFIG.mode in ('eval', 'train_and_eval' or (RUN_CONFIG.mode == 'train' and RUN_CONFIG.eval_after_training)):
-
-        eval_input_fn = dataloader.InputReader(
-            file_pattern=RUN_CONFIG.validation_file_pattern,
-            mode=tf.estimator.ModeKeys.PREDICT,
-            num_examples=RUN_CONFIG.eval_samples,
-            use_fake_data=False,
-            use_instance_mask=RUN_CONFIG.include_mask,
-            seed=RUN_CONFIG.seed,
-            disable_options=RUN_CONFIG.disable_data_options
-        )
-
-    else:
-        eval_input_fn = None
-        
-    if RUN_CONFIG.loop_mode=='estimator':
-        run_executer(RUN_CONFIG, train_input_fn, eval_input_fn)
-    elif RUN_CONFIG.loop_mode=='session':
-        run_session(RUN_CONFIG, train_input_fn, eval_input_fn)
-    elif RUN_CONFIG.loop_mode=='tape':
-        run_tape(RUN_CONFIG, train_input_fn, eval_input_fn)
 
 if __name__ == '__main__':
     logging.set_verbosity(logging.INFO)
@@ -183,4 +188,5 @@ if __name__ == '__main__':
     logging.set_verbosity(logging.DEBUG)
     tf.autograph.set_verbosity(0)
     log_cleaning(hide_deprecation_warnings=True)
+
     app.run(main)

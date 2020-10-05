@@ -20,44 +20,64 @@ import sys
 
 __all__ = ["MPI_local_rank", "MPI_rank", "MPI_size", "MPI_rank_and_size", "MPI_is_distributed"]
 
+from mask_rcnn.utils.herring_env import is_herring
 
-def MPI_is_distributed():
+if is_herring():
+    import herring.tensorflow as herring
+
+def MPI_is_distributed(run_herring=False):
     """Return a boolean whether a distributed training/inference runtime is being used.
     :return: bool
     """
-
-    if all([var in os.environ for var in ["OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"]]):
-        return True
-
-    elif all([var in os.environ for var in ["SLURM_PROCID", "SLURM_NTASKS"]]):
-        return True
+    if run_herring:
+        return herring.size() > 1
 
     else:
-        return False
+        if all([var in os.environ for var in ["OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"]]):
+            return True
+
+        elif all([var in os.environ for var in ["SLURM_PROCID", "SLURM_NTASKS"]]):
+            return True
+
+        else:
+            return False
 
 
-def MPI_local_rank():
+def MPI_local_rank(run_herring=False):
 
-    if "OMPI_COMM_WORLD_LOCAL_RANK" in os.environ:
-        return int(os.environ.get("OMPI_COMM_WORLD_LOCAL_RANK"))
-
-    elif "SLURM_LOCALID" in os.environ:
-        return int(os.environ.get("SLURM_LOCALID"))
-
+    if run_herring:
+        return herring.local_rank()
     else:
-        return 0
+        if "OMPI_COMM_WORLD_LOCAL_RANK" in os.environ:
+            return int(os.environ.get("OMPI_COMM_WORLD_LOCAL_RANK"))
+
+        elif "SLURM_LOCALID" in os.environ:
+            return int(os.environ.get("SLURM_LOCALID"))
+
+        else:
+            return 0
 
 
-def MPI_rank():
-    return int(os.environ.get("OMPI_COMM_WORLD_RANK", 0))
+def MPI_rank(run_herring=False):
+
+    if run_herring:
+        return herring.rank()
+    else:
+        return int(os.environ.get("OMPI_COMM_WORLD_RANK", 0))
 
 
-def MPI_size():
-    return int(os.environ.get("OMPI_COMM_WORLD_SIZE", 1))
+def MPI_size(run_herring=False):
+    if run_herring:
+        return herring.size()
+    else:
+        return int(os.environ.get("OMPI_COMM_WORLD_SIZE", 1))
 
 
-def MPI_rank_and_size():
-    return MPI_rank(), MPI_size()
+def MPI_rank_and_size(run_herring=False):
+    if run_herring:
+        return herring.rank(), herring.size()
+    else:
+        return MPI_rank(), MPI_size()
 
 
 # Source: https://github.com/horovod/horovod/blob/c3626e/test/common.py#L25

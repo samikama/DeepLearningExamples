@@ -234,6 +234,8 @@ def define_hparams_flags():
 
     flags.DEFINE_string('val_json_file', default="", help='Filepath for the validation json file')
 
+    flags.DEFINE_bool('run_herring', default=False, help='Enable Herring')
+    flags.DEFINE_bool('offload_eval', default=False, help='Run eval on another node')
     ############################# TO BE REMOVED ###################################
 
     flags.DEFINE_integer(
