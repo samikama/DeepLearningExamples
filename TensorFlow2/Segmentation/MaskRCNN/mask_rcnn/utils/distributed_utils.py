@@ -20,8 +20,10 @@ import sys
 
 __all__ = ["MPI_local_rank", "MPI_rank", "MPI_size", "MPI_rank_and_size", "MPI_is_distributed"]
 
+from mask_rcnn.utils.herring_env import is_herring
 
-
+if is_herring():
+    import herring.tensorflow as herring
 
 def MPI_is_distributed(run_herring=False):
     """Return a boolean whether a distributed training/inference runtime is being used.

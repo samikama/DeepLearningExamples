@@ -33,6 +33,12 @@ from absl import app
 
 import tensorflow as tf
 from tensorflow.python.framework.ops import disable_eager_execution
+from mask_rcnn.utils.herring_env import is_herring
+
+if is_herring():
+    print("HERRING ENV IS ACTIVE")
+    import herring.tensorflow as herring
+    herring.init()
 
 from mask_rcnn.utils.logging_formatter import logging
 
@@ -109,16 +115,6 @@ def main(argv):
     # ============================ Configure parameters ============================ #
 
 
-    if RUN_CONFIG.run_herring:
-        try:
-            import herring.tensorflow as herring
-            herring.init()
-            gpus = tf.config.list_physical_devices('GPU')
-            if gpus:
-                tf.config.set_visible_devices(gpus[herring.local_rank()], 'GPU')
-
-        except:
-            raise ImportError("Unable to import Herring. Are you sure you're running with herringrun?")
     
     if RUN_CONFIG.use_tf_distributed and MPI_is_distributed():
         raise RuntimeError("Incompatible Runtime. Impossible to use `--use_tf_distributed` with MPIRun Horovod")

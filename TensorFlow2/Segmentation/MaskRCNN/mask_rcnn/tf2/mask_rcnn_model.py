@@ -66,8 +66,13 @@ from mask_rcnn.tf2.utils import warmup_scheduler, eager_mapping
 
 from mask_rcnn.utils.meters import StandardMeter
 from mask_rcnn.utils.metric_tracking import register_metric
+from mask_rcnn.utils.herring_env import is_herring
 
 
+if is_herring():
+    import herring.tensorflow as herring
+else:
+    hvd = LazyImport("horovod.tensorflow")
 
 MODELS = dict()
 
@@ -825,10 +830,6 @@ class TapeModel(object):
     def __init__(self, params, train_input_fn=None, eval_input_fn=None, is_training=True):
         self.params = params
 
-        if self.params.run_herring:
-            import herring.tensorflow as herring
-        else:
-            hvd = LazyImport("horovod.tensorflow")
 
         self.forward = MRCNN(self.params.values(), is_training=is_training)
         self.model_dir = self.params.model_dir
@@ -911,7 +912,7 @@ class TapeModel(object):
             if self.params.amp:
                 scaled_loss = self.optimizer.get_scaled_loss(loss_dict['total_loss'])
 
-        if self.params.run_herring:
+        if is_herring():
             if MPI_is_distributed(True):
                 tape = herring.DistributedGradientTape(tape)
             if self.params.amp:
@@ -953,7 +954,7 @@ class TapeModel(object):
         self.load_weights()
     
     def train_epoch(self, steps, broadcast=False):
-        if MPI_rank(self.params.run_herring)==0:
+        if MPI_rank(is_herring())==0:
             logging.info("Starting training loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             loss_history = []
@@ -975,7 +976,7 @@ class TapeModel(object):
 
             delta_t = time.perf_counter() - tstart
             timings.append(delta_t)
-            if MPI_rank(self.params.run_herring)==0:
+            if MPI_rank(is_herring())==0:
                 loss_history.append(loss_dict['total_loss'].numpy())
                 step = self.optimizer.iterations
                 learning_rate = self.schedule(step)
@@ -985,7 +986,7 @@ class TapeModel(object):
             #    timings = np.asarray(timings, np.float)
             #    print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
             #    timings = []
-        if MPI_rank(self.params.run_herring) == 0:
+        if MPI_rank(is_herring()) == 0:
             print("Saving checkpoint...")
             self.epoch_num+=1
             self.save_model()
@@ -1023,7 +1024,7 @@ class TapeModel(object):
         return model_outputs
             
     def run_eval(self, steps, async_eval=False, use_ext=False):
-        if MPI_rank(self.params.run_herring)==0:
+        if MPI_rank(is_herring())==0:
             logging.info("Starting eval loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         else:
@@ -1042,7 +1043,7 @@ class TapeModel(object):
         _preds = copy.deepcopy(worker_predictions)
         for k, v in _preds.items():
             _preds[k] = np.concatenate(v, axis=0)
-        if MPI_rank(self.params.run_herring) < 32:
+        if MPI_rank(is_herring()) < 32:
             converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
             worker_source_ids = _preds['source_id']
         else:
@@ -1052,7 +1053,7 @@ class TapeModel(object):
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
         source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
-        if MPI_rank(self.params.run_herring) == 0:
+        if MPI_rank(is_herring()) == 0:
             all_predictions = []
             source_ids = []
             for i, p in enumerate(predictions_list):
