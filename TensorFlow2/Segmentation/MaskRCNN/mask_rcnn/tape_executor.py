@@ -24,7 +24,7 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         if gpus:
             tf.config.set_visible_devices(gpus[herring.local_rank()], 'GPU')
     else:
-        if MPI_is_distributed:
+        if MPI_is_distributed(False):
             import horovod.tensorflow as hvd
             hvd.init()
             
@@ -38,15 +38,23 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn)
     mrcnn_model.initialize_model()
     eval_workers = min(MPI_size(is_herring()), 32)
-    #for epoch in range(run_config.first_eval):
-    #    if MPI_rank(is_herring())==0:
-    #        logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-    #    mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
-    for epoch in range(total_epochs):
-        if MPI_rank(is_herring())==0:
-            logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-        mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
-#        if MPI_rank(is_herring())==0:
-#            logging.info("Running epoch {} evaluation".format(epoch+1))
-#        mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval, 
-#                             use_ext=run_config.use_ext)
+    
+    if run_config.offload_eval:
+        for epoch in range(run_config.first_eval, total_epochs):
+            if MPI_rank(is_herring())==0:
+                logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
+            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+    
+    else:
+        for epoch in range(run_config.first_eval):
+            if MPI_rank(is_herring())==0:
+                logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
+            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+        for epoch in range(run_config.first_eval, total_epochs):
+            if MPI_rank(is_herring())==0:
+                logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
+            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+            if MPI_rank(is_herring())==0:
+                logging.info("Running epoch {} evaluation".format(epoch+1))
+            mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval, 
+                                 use_ext=run_config.use_ext)
