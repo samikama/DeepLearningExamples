@@ -36,7 +36,6 @@ from tensorflow.python.framework.ops import disable_eager_execution
 from mask_rcnn.utils.herring_env import is_herring
 
 if is_herring():
-    print("HERRING ENV IS ACTIVE")
     import herring.tensorflow as herring
     herring.init()
 
