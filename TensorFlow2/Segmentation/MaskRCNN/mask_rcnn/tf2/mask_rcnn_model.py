@@ -928,9 +928,15 @@ class TapeModel(object):
         return loss_dict
     
     def initialize_model(self):
+        if MPI_rank()==0:
+            logging.info("Initializing model")
         features, labels = next(self.train_tdf)
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
+        b_w = tf.convert_to_tensor(True)
+        b_o = tf.convert_to_tensor(True)
+        loss_dict = self.train_step(features, labels, b_w, b_o)
+        prediction = self.predict(features)
     
     def train_epoch(self, steps, broadcast=False):
         if MPI_rank()==0:
