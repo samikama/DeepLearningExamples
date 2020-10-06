@@ -23,12 +23,14 @@ procedure.
 
 """
 
+import sys
 import itertools
 import copy,os
 import numpy as np
 import multiprocessing
 from statistics import mean
 import threading
+from collections import defaultdict
 from math import ceil
 from mpi4py import MPI
 from tqdm import tqdm
@@ -841,10 +843,17 @@ class TapeModel(object):
             schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(self.params.learning_rate_steps,
                                                                             [self.params.init_learning_rate] + \
                                                                             self.params.learning_rate_levels)
+            schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
+                                                    self.params.warmup_steps)
+        elif self.params.lr_schedule=='cosine':
+            schedule = tf.keras.experimental.CosineDecay(self.params.init_learning_rate,
+                                                         self.params.total_steps - self.params.warmup_steps,
+                                                         alpha=self.params.alpha)
+            schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
+                                                    self.params.warmup_steps, overlap=False)
         else:
             raise NotImplementedError
-        schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
-                                                    self.params.warmup_steps)
+        
         if self.params.optimizer_type=="SGD":
             opt = tf.keras.optimizers.SGD(learning_rate=schedule, 
                                           momentum=self.params.momentum)
@@ -919,14 +928,21 @@ class TapeModel(object):
         return loss_dict
     
     def initialize_model(self):
+        if MPI_rank()==0:
+            logging.info("Initializing model")
         features, labels = next(self.train_tdf)
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
+        b_w = tf.convert_to_tensor(True)
+        b_o = tf.convert_to_tensor(True)
+        loss_dict = self.train_step(features, labels, b_w, b_o)
+        prediction = self.predict(features)
     
     def train_epoch(self, steps, broadcast=False):
         if MPI_rank()==0:
             logging.info("Starting training loop")
-            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+            p_bar = tqdm(range(steps), file=sys.stdout, 
+                         bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             loss_history = []
         else:
             p_bar = range(steps)
@@ -938,6 +954,8 @@ class TapeModel(object):
             else:
                 b_w, b_o = False, False
             features, labels = next(self.train_tdf)
+            b_w = tf.convert_to_tensor(b_w)
+            b_o = tf.convert_to_tensor(b_o)
             loss_dict = self.train_step(features, labels, b_w, b_o)
             if MPI_rank()==0:
                 loss_history.append(loss_dict['total_loss'].numpy())
@@ -958,7 +976,8 @@ class TapeModel(object):
     def run_eval(self, steps, async_eval=False, use_ext=False):
         if MPI_rank()==0:
             logging.info("Starting eval loop")
-            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+            p_bar = tqdm(range(steps), file=sys.stdout, 
+                         bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         else:
             p_bar = range(steps)
         worker_predictions = dict()
@@ -977,23 +996,38 @@ class TapeModel(object):
             _preds[k] = np.concatenate(v, axis=0)
         if MPI_rank() < 32:
             converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+            # converted_predictions = coco.load_predictions2(_preds, include_mask=True, is_image_mask=False)
             worker_source_ids = _preds['source_id']
+            # worker_source_ids = list(converted_predictions.keys())
         else:
-            converted_predictions = []
+            #converted_predictions = defaultdict(list)
+            converted_predictions =[]
             worker_source_ids = []
         MPI.COMM_WORLD.barrier()
+        if MPI_rank() == 0:
+            logging.info("Gathering logs")
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
         source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
         if MPI_rank() == 0:
+            logging.info("logs gathered")
+        if MPI_rank() == 0:
             all_predictions = []
             source_ids = []
             for i, p in enumerate(predictions_list):
-                if i < 32:
-                    all_predictions.extend(p)
+                all_predictions.extend(p)
             for i, s in enumerate(source_ids_list):
-                if i < 32:
-                    source_ids.extend(s)
+                source_ids.extend(s)
+            '''all_predictions = []
+            source_ids = []
+            logging.info("Assembling results")
+            for i, p in enumerate(predictions_list):
+                for a_key, a_value in p.items():
+                    if a_key not in source_ids:
+                        source_ids.append(a_key)
+                        all_predictions.extend(a_value)'''
+            logging.info("{} images in detection results".format(len(source_ids)))
+            logging.info("{} unique images in detection results".format(len(set(source_ids))))
             if use_ext:
                 args = [all_predictions, validation_json_file]
                 if async_eval:

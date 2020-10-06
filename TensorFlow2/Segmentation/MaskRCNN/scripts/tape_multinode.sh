@@ -13,27 +13,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Batch size per gpu 4 on arbitrary number of nodes
+# as specified in hosts file
+
 BATCH_SIZE=4
-HOST_COUNT=1
+HOST_COUNT=`wc -l < ~/hosts`
 GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
 STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
-FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
-SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
-TOTAL_STEPS=$(( 13 * STEP_PER_EPOCH ))
-LR_MULTIPLIER=0.001
+FIRST_DECAY=$(( 12 * STEP_PER_EPOCH ))
+SECOND_DECAY=$(( 15 * STEP_PER_EPOCH ))
+TOTAL_STEPS=$(( 18 * STEP_PER_EPOCH ))
+LR_MULTIPLIER=0.0008
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
-
+WARMUP_STEPS=$(( 4 * STEP_PER_EPOCH ))
 
 source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../baseline_1x
-mkdir -p $BASEDIR/../baseline_1x
+rm -rf $BASEDIR/../results_tape_1x
+mkdir -p $BASEDIR/../results_tape_1x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    -np $GPU_COUNT -H localhost:$GPU_COUNT \
+    --hostfile ~/hosts \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
@@ -48,11 +51,11 @@ mkdir -p $BASEDIR/../baseline_1x
         --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../baseline_1x" \
+        --model_dir="$BASEDIR/../results_tape_1x" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1000 \
-        --global_gradient_clip_ratio=0.0 \
+        --warmup_steps=$WARMUP_STEPS \
+        --global_gradient_clip_ratio=5.0 \
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
         --train_batch_size=$BATCH_SIZE \
@@ -62,9 +65,8 @@ mkdir -p $BASEDIR/../baseline_1x
         --validation_file_pattern="/home/ubuntu/data/nv_coco/val*.tfrecord" \
         --val_json_file="/home/ubuntu/data/annotations/instances_val2017.json" \
         --amp \
-        --use_batched_nms \
         --xla \
-        --tf2 \
+        --use_batched_nms \
         --async_eval \
         --use_ext \
-        --use_custom_box_proposals_op | tee $BASEDIR/../baseline_1x/baseline_1x.log
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_tape_1x/results_tape_1x.log

@@ -24,6 +24,8 @@ FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
 SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
 TOTAL_STEPS=${TOTAL_STEPS:-$(( 13 * STEP_PER_EPOCH ))}
 DATA_PATH=${DATA_PATH:-"/data/coco/coco-2017"}
+LR_MULTIPLIER=0.001
+BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -44,6 +46,7 @@ mkdir -p $BASEDIR/../baseline_1x
         --log_interval=1000 \
         --init_learning_rate=0.04 \
         --learning_rate_steps="${FIRST_DECAY},${SECOND_DECAY}" \
+        --init_learning_rate=$BASE_LR \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
         --model_dir="$BASEDIR/../baseline_1x" \

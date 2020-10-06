@@ -1,6 +1,7 @@
 import os
 import sys
 from math import ceil
+import time
 
 os.environ['CUDA_CACHE_DISABLE'] = '0'
 os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
@@ -30,15 +31,22 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn)
     mrcnn_model.initialize_model()
     eval_workers = min(MPI_size(), 32)
+    # eval_workers = MPI_size()
+    start_time = time.time()
     for epoch in range(run_config.first_eval):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-        mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+            mpi_size = MPI_size()
+            logging.info("Number of GPUs {}".format(mpi_size))
+        mrcnn_model.train_epoch(run_config.num_steps_per_eval)
     for epoch in range(run_config.first_eval, total_epochs):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-        mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+        mrcnn_model.train_epoch(run_config.num_steps_per_eval)
         if MPI_rank()==0:
-            logging.info("Running epoch {} evaluation".format(epoch+1))
-        mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval, 
+            logging.info("Running epoch {} evaluation on {} workers".format(epoch+1, eval_workers))
+        mrcnn_model.run_eval(run_config.eval_samples//eval_workers+1, async_eval=run_config.async_eval, 
                              use_ext=run_config.use_ext)
+    if MPI_rank()==0:
+        logging.info("Training complete in {} seconds.".format(time.time() - start_time))
+
