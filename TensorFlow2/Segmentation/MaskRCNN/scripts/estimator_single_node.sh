@@ -44,7 +44,6 @@ mkdir -p $BASEDIR/../baseline_1x
         --checkpoint="${BASEDIR}/../weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --log_interval=1000 \
-        --init_learning_rate=0.04 \
         --learning_rate_steps="${FIRST_DECAY},${SECOND_DECAY}" \
         --init_learning_rate=$BASE_LR \
         --optimizer_type="SGD" \

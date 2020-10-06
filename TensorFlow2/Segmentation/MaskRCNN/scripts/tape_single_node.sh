@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-BATCH_SIZE=4
+BATCH_SIZE=1
 HOST_COUNT=1
 GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 IMAGES=118287
@@ -21,7 +21,8 @@ GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
 STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
 FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
 SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
-TOTAL_STEPS=$(( 13 * STEP_PER_EPOCH ))
+TOTAL_STEPS=${TOTAL_STEPS:-$(( 13 * STEP_PER_EPOCH ))}
+DATA_PATH=${DATA_PATH:-"/data/coco/coco-2017"}
 LR_MULTIPLIER=0.001
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
@@ -29,8 +30,8 @@ BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../baseline_1x
-mkdir -p $BASEDIR/../baseline_1x
+rm -rf $BASEDIR/../baseline_1x_tape
+mkdir -p $BASEDIR/../baseline_1x_tape
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     -np $GPU_COUNT -H localhost:$GPU_COUNT \
@@ -39,16 +40,18 @@ mkdir -p $BASEDIR/../baseline_1x
     -x PATH \
     --oversubscribe \
     /home/ubuntu/anaconda3/envs/mask_rcnn/bin/python ${BASEDIR}/../mask_rcnn_main.py \
-        --mode="train_and_eval" \
-        --checkpoint="/home/ubuntu/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
-        --eval_samples=5000 \
+        --mode="train" \
+        --eval_after_training=0\
         --loop_mode="tape" \
-        --log_interval=100 \
+        --eval_after_training=0 \
+        --checkpoint="${BASEDIR}/../weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+        --eval_samples=5000 \
+        --log_interval=1000 \
         --init_learning_rate=$BASE_LR \
         --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../baseline_1x" \
+        --model_dir="$BASEDIR/../baseline_1x_tape" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1000 \
@@ -58,9 +61,9 @@ mkdir -p $BASEDIR/../baseline_1x
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern="/home/ubuntu/data/nv_coco/train*.tfrecord" \
-        --validation_file_pattern="/home/ubuntu/data/nv_coco/val*.tfrecord" \
-        --val_json_file="/home/ubuntu/data/annotations/instances_val2017.json" \
+        --training_file_pattern="${DATA_PATH}/nv_coco/train*.tfrecord" \
+        --validation_file_pattern="${DATA_PATH}/nv_coco/val*.tfrecord" \
+        --val_json_file="${DATA_PATH}/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \

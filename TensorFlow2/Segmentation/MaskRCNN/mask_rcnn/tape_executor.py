@@ -33,6 +33,8 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     eval_workers = min(MPI_size(), 32)
     # eval_workers = MPI_size()
     start_time = time.time()
+    if run_config.mode.lower() == "train_and_eval":
+        eval_each_step=True
     for epoch in range(run_config.first_eval):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
@@ -43,10 +45,17 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
         mrcnn_model.train_epoch(run_config.num_steps_per_eval)
-        if MPI_rank()==0:
-            logging.info("Running epoch {} evaluation on {} workers".format(epoch+1, eval_workers))
-        mrcnn_model.run_eval(run_config.eval_samples//eval_workers+1, async_eval=run_config.async_eval, 
+        if eval_each_step:
+            if MPI_rank()==0:
+                logging.info("Running epoch {} evaluation on {} workers".format(epoch+1, eval_workers))
+            mrcnn_model.run_eval(run_config.eval_samples//eval_workers+1, async_eval=run_config.async_eval, 
                              use_ext=run_config.use_ext)
+    if run_config.eval_after_training:
+            if MPI_rank()==0:
+                logging.info("Running evaluation after training on {} workers".format( eval_workers))
+            mrcnn_model.run_eval(run_config.eval_samples//eval_workers+1, async_eval=run_config.async_eval, 
+                             use_ext=run_config.use_ext)
+
     if MPI_rank()==0:
         logging.info("Training complete in {} seconds.".format(time.time() - start_time))
 
