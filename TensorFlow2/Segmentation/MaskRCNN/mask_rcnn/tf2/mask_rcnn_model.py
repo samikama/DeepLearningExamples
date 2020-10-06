@@ -811,7 +811,7 @@ class SessionModel(object):
         if use_xla:
             logging.info("XLA is activated - Experiment Feature")
             config.graph_options.optimizer_options.global_jit_level = tf.compat.v1.OptimizerOptions.ON_1
-        config.intra_op_parallelism_threads = 1  # Avoid pool of Eigen threads
+        config.intra_op_parallelism_threads = 2  # Avoid pool of Eigen threads
         if MPI_is_distributed():
             config.inter_op_parallelism_threads = max(2, multiprocessing.cpu_count() // hvd.local_size())
         elif not use_tf_distributed:

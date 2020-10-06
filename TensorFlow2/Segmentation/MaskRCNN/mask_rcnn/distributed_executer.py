@@ -203,13 +203,14 @@ class BaseExecuter(object):
           # config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_2
 
       if mode == 'train':
-          config.intra_op_parallelism_threads = 1  # Avoid pool of Eigen threads
+          config.intra_op_parallelism_threads = 2 # multiprocessing.cpu_count() // hvd.local_size()  # Avoid pool of Eigen threads
 
           if MPI_is_distributed():
-              config.inter_op_parallelism_threads = max(2, multiprocessing.cpu_count() // hvd.local_size())
+              config.inter_op_parallelism_threads = max(4, multiprocessing.cpu_count() // hvd.local_size())
 
           elif not use_tf_distributed:
-              config.inter_op_parallelism_threads = 4
+            pass
+            #config.inter_op_parallelism_threads = -1
 
       return config
 
@@ -296,7 +297,7 @@ class BaseExecuter(object):
             mode="train",
             runtime_config=self._runtime_config,
         )
-    #hooks.append(RuntimeNVTXHook(warmup_steps=self._runtime_config.warmup_steps,is_training=True))
+    hooks.append(RuntimeNVTXHook(warmup_steps=self._runtime_config.warmup_steps,is_training=True))
     train_estimator.train(
         input_fn=train_input_fn,
         max_steps=self._runtime_config.total_steps,

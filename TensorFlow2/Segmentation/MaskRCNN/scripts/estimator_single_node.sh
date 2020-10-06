@@ -38,7 +38,7 @@ mkdir -p $BASEDIR/../baseline_1x
     --oversubscribe \
     python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train" \
-        --eval_after_training=1 \
+        --eval_after_training=0 \
         --checkpoint="${BASEDIR}/../weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --log_interval=1000 \
@@ -49,7 +49,7 @@ mkdir -p $BASEDIR/../baseline_1x
         --model_dir="$BASEDIR/../baseline_1x" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1000 \
+        --warmup_steps=200 \
         --global_gradient_clip_ratio=0.0 \
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \

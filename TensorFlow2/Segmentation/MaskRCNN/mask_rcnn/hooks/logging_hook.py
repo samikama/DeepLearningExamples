@@ -18,7 +18,7 @@
 import copy
 import operator
 import time
-
+import os
 import numpy as np
 import tensorflow as tf
 from tensorflow.python import _pywrap_nvtx as nvtx
@@ -65,7 +65,11 @@ class _RuntimeNVTXHook(tf.estimator.SessionRunHook):
         self._session_token=None
         self._step_token=None
         self._training=is_training
+        self._event_times=[]
+        self._event_start=None
     def __atexit__(self):
+        times=np.asarray(self._event_times,dtype=np.float64)
+        np.savez(f"times_{os.getpid()}.npz",step_times=times)
         pass
     def begin(self):
         """Called once before using the session.
@@ -131,7 +135,7 @@ class _RuntimeNVTXHook(tf.estimator.SessionRunHook):
             runtype="EvalStep"
         self._step_token=nvtx.push(f"{runtype}-{self._current_step}",runtype)
         self._current_step += 1
-
+        self._event_start=time.perf_counter()
         return None
 
     def after_run(self, run_context, run_values):  # pylint: disable=unused-argument
@@ -145,6 +149,7 @@ class _RuntimeNVTXHook(tf.estimator.SessionRunHook):
           run_context: A `SessionRunContext` object.
           run_values: A SessionRunValues object.
         """
+        self._event_times.append(time.perf_counter()-self._event_start)
         nvtx.pop(self._step_token)
 
 @atexit_hook

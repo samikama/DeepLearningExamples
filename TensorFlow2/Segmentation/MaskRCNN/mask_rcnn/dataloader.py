@@ -225,8 +225,8 @@ class InputReader(object):
             # data_options.experimental_distribute.auto_shard = False
             data_options.experimental_slack = params['data_slack']
 
-            data_options.experimental_threading.max_intra_op_parallelism = 1
-            # data_options.experimental_threading.private_threadpool_size = int(multiprocessing.cpu_count() / n_gpus) * 2
+            #data_options.experimental_threading.max_intra_op_parallelism = 1
+            data_options.experimental_threading.private_threadpool_size = 3
 
             # ================= experimental_optimization ================= #
 
