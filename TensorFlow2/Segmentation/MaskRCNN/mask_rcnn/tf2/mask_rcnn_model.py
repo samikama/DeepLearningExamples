@@ -45,7 +45,7 @@ from mask_rcnn.models import heads
 from mask_rcnn.tf2.models import heads as tf2_heads
 from mask_rcnn.models import resnet
 
-from mask_rcnn.training import losses, learning_rates
+from mask_rcnn.training import losses, learning_rates, optimizers
 
 from mask_rcnn.ops import postprocess_ops
 from mask_rcnn.ops import roi_ops
@@ -730,9 +730,9 @@ class SessionModel(object):
             raise NotImplementedError
 
         grads_and_vars = optimizer.compute_gradients(total_loss, trainable_variables, colocate_gradients_with_ops=True)
-        
+ 
         gradients, variables = zip(*grads_and_vars)
-        
+ 
         global_gradient_clip_ratio = self.run_config.global_gradient_clip_ratio
         if global_gradient_clip_ratio > 0.0:
             all_are_finite = tf.reduce_all([tf.reduce_all(tf.math.is_finite(g)) for g in gradients])
@@ -782,7 +782,7 @@ class SessionModel(object):
             register_metric(name="Learning rate", tensor=learning_rate, aggregator=StandardMeter())
             pass
         return output_dict
-    
+ 
     def eval_fn(self):
         #with tf.xla.experimental.jit_scope(compile_ops=False):
         features = self.eval_tdf.get_next()['features']
@@ -852,6 +852,10 @@ class TapeModel(object):
             schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(self.params.learning_rate_steps,
                                                                             [self.params.init_learning_rate] + \
                                                                             self.params.learning_rate_levels)
+        elif self.params.lr_schedule=='cosine':
+            schedule = tf.keras.experimental.CosineDecay(self.params.init_learning_rate,
+                                                         self.params.total_steps,
+                                                         alpha=0.001)
         else:
             raise NotImplementedError
         schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
@@ -862,13 +866,18 @@ class TapeModel(object):
         elif self.params.optimizer_type=="LAMB":
             opt = tfa.optimizers.LAMB(learning_rate=schedule)
         elif self.params.optimizer_type=="Novograd":
-            opt = tfa.optimizers.NovoGrad(learning_rate=schedule)
+            opt = optimizers.NovoGrad(learning_rate=schedule,
+                                          beta_1=self.params.beta1,
+                                          beta_2=self.params.beta2,
+                                          weight_decay=self.params.l2_weight_decay,
+                                          exclude_from_weight_decay=['bias', 'beta', 'batch_normalization'])
         else:
             raise NotImplementedError
         if self.params.amp:
             opt = tf.keras.mixed_precision.experimental.LossScaleOptimizer(opt, 'dynamic')
         return opt, schedule
-    
+
+
     @tf.function
     def train_step(self, features, labels, sync_weights=False, sync_opt=False):
         loss_dict = dict()
@@ -937,7 +946,24 @@ class TapeModel(object):
                 gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
             else:
                 gradients = tape.gradient(loss_dict['total_loss'], self.forward.trainable_variables)
-            self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
+            global_gradient_clip_ratio = self.params.global_gradient_clip_ratio
+            if global_gradient_clip_ratio > 0.0:
+                all_are_finite = tf.reduce_all([tf.reduce_all(tf.math.is_finite(g)) for g in gradients])
+                (clipped_grads, _) = tf.clip_by_global_norm(gradients, clip_norm=global_gradient_clip_ratio,
+                                use_norm=tf.cond(all_are_finite, lambda: tf.linalg.global_norm(gradients), lambda: tf.constant(1.0)))
+                gradients = clipped_grads
+        
+            grads_and_vars = []
+            # Special treatment for biases (beta is named as bias in reference model)
+            # Reference: https://github.com/ddkang/Detectron/blob/80f3295308/lib/modeling/optimizer.py#L109
+            for grad, var in zip(gradients, self.forward.trainable_variables):
+                if grad is not None and any([pattern in var.name for pattern in ["bias", "beta"]]):
+                    grad = 2.0 * grad
+                grads_and_vars.append((grad, var))
+
+            # self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
+            self.optimizer.apply_gradients(grads_and_vars)
+
             if MPI_is_distributed() and sync_weights:
                 if MPI_rank()==0:
                     logging.info("Broadcasting variables")

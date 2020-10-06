@@ -262,6 +262,7 @@ def dataset_parser(value, mode, params, use_instance_mask, seed=None, regenerate
 
 
 def preprocess_image(image, boxes, instance_masks, image_size, max_level, augment_input_data=False, seed=None):
+    
     image = preprocess_ops.normalize_image(image)
 
     if augment_input_data:
@@ -374,7 +375,8 @@ def augment_image(image, boxes, instance_masks, seed):
 
     else:
         image, boxes = flipped_results
-
+    # multiplicative gaussian noise - speckle
+    image = preprocess_ops.add_noise(image, std=0.2, seed=seed) # add noise half of the time - std scale taken from https://openreview.net/pdf?id=SkeKtyHYPS
     # image = tf.image.random_brightness(image, max_delta=0.1, seed=seed)
     # image = tf.image.random_contrast(image, lower=0.9, upper=1.1, seed=seed)
     # image = tf.image.random_saturation(image, lower=0.9, upper=1.1, seed=seed)
