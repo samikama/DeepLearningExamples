@@ -24,6 +24,7 @@ from __future__ import print_function
 from distutils.version import LooseVersion
 
 import tensorflow as tf
+from mask_rcnn.utils import box_utils
 
 DEBUG_LOSS_IMPLEMENTATION = False
 
@@ -33,6 +34,66 @@ if LooseVersion(tf.__version__) < LooseVersion("2.0.0"):
     ReductionV2 = losses_utils.ReductionV2
 else:
     ReductionV2 = tf.keras.losses.Reduction
+
+def _calculate_giou(b1, b2, mode="giou"):
+    """
+    Args:
+        b1: bounding box. The coordinates of the each bounding box in boxes are
+            encoded as [y_min, x_min, y_max, x_max].
+        b2: the other bounding box. The coordinates of the each bounding box
+            in boxes are encoded as [y_min, x_min, y_max, x_max].
+        mode: one of ['giou', 'iou'], decided to calculate GIoU or IoU loss.
+    Returns:
+        GIoU loss float `Tensor`.
+    """
+    zero = tf.convert_to_tensor(0.0, b1.dtype)
+    b1_ymin, b1_xmin, b1_ymax, b1_xmax = tf.unstack(b1, 4, axis=-1)
+    b2_ymin, b2_xmin, b2_ymax, b2_xmax = tf.unstack(b2, 4, axis=-1)
+    b1_width = tf.maximum(zero, b1_xmax - b1_xmin)
+    b1_height = tf.maximum(zero, b1_ymax - b1_ymin)
+    b2_width = tf.maximum(zero, b2_xmax - b2_xmin)
+    b2_height = tf.maximum(zero, b2_ymax - b2_ymin)
+    b1_area = b1_width * b1_height
+    b2_area = b2_width * b2_height
+
+    intersect_ymin = tf.maximum(b1_ymin, b2_ymin)
+    intersect_xmin = tf.maximum(b1_xmin, b2_xmin)
+    intersect_ymax = tf.minimum(b1_ymax, b2_ymax)
+    intersect_xmax = tf.minimum(b1_xmax, b2_xmax)
+    intersect_width = tf.maximum(zero, intersect_xmax - intersect_xmin)
+    intersect_height = tf.maximum(zero, intersect_ymax - intersect_ymin)
+    intersect_area = intersect_width * intersect_height
+
+    union_area = b1_area + b2_area - intersect_area
+    iou = tf.math.divide_no_nan(intersect_area, union_area)
+    if mode == "iou":
+        return iou
+
+    enclose_ymin = tf.minimum(b1_ymin, b2_ymin)
+    enclose_xmin = tf.minimum(b1_xmin, b2_xmin)
+    enclose_ymax = tf.maximum(b1_ymax, b2_ymax)
+    enclose_xmax = tf.maximum(b1_xmax, b2_xmax)
+    enclose_width = tf.maximum(zero, enclose_xmax - enclose_xmin)
+    enclose_height = tf.maximum(zero, enclose_ymax - enclose_ymin)
+    enclose_area = enclose_width * enclose_height
+    giou = iou - tf.math.divide_no_nan((enclose_area - union_area), enclose_area)
+    return giou
+
+
+def _giou_loss(y_true, y_pred, weights):
+    y_pred = tf.cast(y_pred, tf.float32)
+    y_true = tf.cast(y_true, y_pred.dtype)
+    weights = tf.cast(weights, tf.float32)
+    y_true = tf.reshape(y_true, [-1, 4])
+    y_pred = tf.reshape(y_pred, [-1, 4])
+    weights = tf.reshape(weights, [-1, 4])
+    giou = _calculate_giou(y_true, y_pred)
+    giou_loss = 1. - giou
+    giou_loss = tf.tile(tf.expand_dims(giou_loss, -1), [1, 4]) * weights # only take pos example contributions
+    giou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(giou_loss), tf.math.count_nonzero(weights, dtype=tf.float32))
+    assert giou_loss.dtype == tf.float32
+    return giou_loss
+
 
 def _l1_loss(y_true, y_pred, weights, delta=0.0):
     l1_loss = tf.compat.v1.losses.absolute_difference(y_true, y_pred, weights=weights)
@@ -323,7 +384,7 @@ def _fast_rcnn_class_loss(class_outputs, class_targets_one_hot, normalizer=1.0):
     return class_loss
 
 
-def _fast_rcnn_box_loss(box_outputs, box_targets, class_targets, normalizer=1.0, delta=1.):
+def _fast_rcnn_box_loss(box_outputs, box_targets, class_targets, loss_type='huber', normalizer=1.0, delta=1.):
     """Computes box regression loss."""
     # delta is typically around the mean value of regression target.
     # for instances, the regression targets of 512x512 input with 6 anchors on
@@ -334,8 +395,13 @@ def _fast_rcnn_box_loss(box_outputs, box_targets, class_targets, normalizer=1.0,
 
         # The loss is normalized by the sum of non-zero weights before additional
         # normalizer provided by the function caller.
-        box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
-        # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
+        if loss_type == 'huber':
+            box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
+        elif loss_type == 'giou':
+            box_loss = _giou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask)
+        else:
+            # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
+            raise NotImplementedError
         
         if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
             box_loss /= normalizer
@@ -343,7 +409,7 @@ def _fast_rcnn_box_loss(box_outputs, box_targets, class_targets, normalizer=1.0,
     return box_loss
 
 
-def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, params):
+def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_box_rois, image_info, params):
     """Computes the box and class loss (Fast-RCNN branch) of Mask-RCNN.
 
     This function implements the classification and box regression loss of the
@@ -400,11 +466,20 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, param
             tf.reshape(box_outputs, [-1, 4])
         )
 
+        if params['box_loss_type'] == 'giou':
+            # decode outputs to move deltas back to coordinate space
+            rpn_box_rois = tf.reshape(rpn_box_rois, [-1, 4])
+            box_outputs = box_utils.decode_boxes(encoded_boxes=box_outputs, anchors=rpn_box_rois, weights=params['bbox_reg_weights'])
+            # Clip boxes FIXME: hardcoding for now
+            box_outputs = box_utils.clip_boxes(box_outputs, 832., 1344.)
+
+
         box_outputs = tf.reshape(box_outputs, [batch_size, -1, 4])
         box_loss = _fast_rcnn_box_loss(
             box_outputs=box_outputs,
             box_targets=box_targets,
             class_targets=class_targets,
+            loss_type=params['box_loss_type'],
             normalizer=1.0
         )
         box_loss *= params['fast_rcnn_box_loss_weight']

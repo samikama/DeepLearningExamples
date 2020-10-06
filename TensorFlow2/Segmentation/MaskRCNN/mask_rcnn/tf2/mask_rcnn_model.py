@@ -344,12 +344,13 @@ class MRCNN(tf.keras.Model):
                                   'box_outputs': box_outputs,
                                   'anchor_boxes': rpn_box_rois})
         else:  # is training
-            encoded_box_targets = training_ops.encode_box_targets(
-                boxes=rpn_box_rois,
-                gt_boxes=box_targets,
-                gt_labels=class_targets,
-                bbox_reg_weights=params['bbox_reg_weights']
-            )
+            if params['box_loss_type'] != "giou":
+                encoded_box_targets = training_ops.encode_box_targets(
+                    boxes=rpn_box_rois,
+                    gt_boxes=box_targets,
+                    gt_labels=class_targets,
+                    bbox_reg_weights=params['bbox_reg_weights']
+                )
 
             model_outputs.update({
                 'rpn_score_outputs': rpn_score_outputs,
@@ -357,7 +358,7 @@ class MRCNN(tf.keras.Model):
                 'class_outputs': class_outputs,
                 'box_outputs': box_outputs,
                 'class_targets': class_targets,
-                'box_targets': encoded_box_targets,
+                'box_targets': encoded_box_targets if params['box_loss_type'] != 'giou' else box_targets,
                 'box_rois': rpn_box_rois,
             })
         # Faster-RCNN mode.
@@ -504,6 +505,8 @@ def _model_fn(features, labels, mode, params):
         box_outputs=model_outputs['box_outputs'],
         class_targets=model_outputs['class_targets'],
         box_targets=model_outputs['box_targets'],
+        rpn_box_rois=model_outputs['box_rois'],
+        image_info=features['image_info'],
         params=params
     )
 
@@ -564,7 +567,7 @@ def _model_fn(features, labels, mode, params):
                 warmup_learning_rate=params['warmup_learning_rate'],
                 warmup_steps=params['warmup_steps'],
                 first_decay_steps=params['total_steps'],
-                alpha= 0.001 #* params['init_learning_rate']
+                alpha= 0.001
             )
         else:
             raise NotImplementedError
@@ -676,6 +679,8 @@ class SessionModel(object):
             box_outputs=model_outputs['box_outputs'],
             class_targets=model_outputs['class_targets'],
             box_targets=model_outputs['box_targets'],
+            rpn_box_rois=model_outputs['box_rois'],
+            image_info=features['image_info'],
             params=self.run_config.values()
         )
         if self.run_config.include_mask:
@@ -885,19 +890,21 @@ class TapeModel(object):
             model_outputs = self.forward(features, labels, self.params.values(), True)
             loss_dict['total_rpn_loss'], loss_dict['rpn_score_loss'], \
                 loss_dict['rpn_box_loss'] = losses.rpn_loss(
-                score_outputs=model_outputs['rpn_score_outputs'],
-                box_outputs=model_outputs['rpn_box_outputs'],
-                labels=labels,
-                params=self.params.values()
-            )
+                    score_outputs=model_outputs['rpn_score_outputs'],
+                    box_outputs=model_outputs['rpn_box_outputs'],
+                    labels=labels,
+                    params=self.params.values()
+                )
             loss_dict['total_fast_rcnn_loss'], loss_dict['fast_rcnn_class_loss'], \
                 loss_dict['fast_rcnn_box_loss'] = losses.fast_rcnn_loss(
-                class_outputs=model_outputs['class_outputs'],
-                box_outputs=model_outputs['box_outputs'],
-                class_targets=model_outputs['class_targets'],
-                box_targets=model_outputs['box_targets'],
-                params=self.params.values()
-            )
+                    class_outputs=model_outputs['class_outputs'],
+                    box_outputs=model_outputs['box_outputs'],
+                    class_targets=model_outputs['class_targets'],
+                    box_targets=model_outputs['box_targets'],
+                    rpn_box_rois=model_outputs['box_rois'],
+                    image_info=features['image_info'],
+                    params=self.params.values()
+                )
             if self.params.include_mask:
                 loss_dict['mask_loss'] = losses.mask_rcnn_loss(
                     mask_outputs=model_outputs['mask_outputs'],
