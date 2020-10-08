@@ -26,18 +26,23 @@ from mpi4py import MPI
 os.environ["CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES",str(MPI.COMM_WORLD.Get_rank()%8))
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
+os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
+os.environ['TF_GPU_THREAD_COUNT'] = '1'
+
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
 
 from absl import app
 
 import tensorflow as tf
+if "force_gpu_compatible" in dir(tf.config):
+    print("Using Custom TF. Enabling pinned memory")
+    tf.config.force_gpu_compatible(True)
 from tensorflow.python.framework.ops import disable_eager_execution
 
 from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 
 from mask_rcnn import dataloader
-from mask_rcnn import distributed_executer
 from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
 from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
 
@@ -54,7 +59,9 @@ FLAGS = define_hparams_flags()
 
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
+    from mask_rcnn import distributed_executer
     mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1
+    
     if runtime_config.use_tf_distributed:
         executer = distributed_executer.TFDistributedExecuter(runtime_config, mask_rcnn_model.mask_rcnn_model_fn)
     else:
@@ -91,7 +98,7 @@ def main(argv):
     RUN_CONFIG = mask_rcnn_params.default_config()
 
     temp_config = FLAGS.flag_values_dict()
-    for i,j in temp_config.items():
+    for i,j in sorted(temp_config.items(),key=lambda x:x[0]):
         print("{}: {}".format(i,j))
     temp_config['learning_rate_decay_levels'] = [float(decay) for decay in temp_config['learning_rate_decay_levels']]
     temp_config['learning_rate_levels'] = [

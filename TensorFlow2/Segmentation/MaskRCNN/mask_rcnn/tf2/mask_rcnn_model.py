@@ -27,6 +27,7 @@ import sys
 import itertools
 import copy,os
 import numpy as np
+import time
 import multiprocessing
 from statistics import mean
 import threading
@@ -66,6 +67,20 @@ from mask_rcnn.tf2.utils import warmup_scheduler, eager_mapping
 
 from mask_rcnn.utils.meters import StandardMeter
 from mask_rcnn.utils.metric_tracking import register_metric
+
+from tensorflow.python.profiler import profiler_v2 as tf_profiler
+from tensorflow.python.profiler.trace import Trace as prof_Trace
+try:
+    from tensorflow.python import _pywrap_nvtx as nvtx
+except ImportError:
+    class DummyNvtx:
+        def __init__(self):
+            pass
+        def push(self,a=None,b=None):
+            pass
+        def pop(self,a=None):
+            pass
+    nvtx=DummyNvtx()
 
 hvd = LazyImport("horovod.tensorflow")
 
@@ -826,6 +841,7 @@ class TapeModel(object):
         self.params = params
         self.forward = MRCNN(self.params.values(), is_training=is_training)
         train_params = dict(self.params.values(), batch_size=self.params.train_batch_size)
+        print("SAMI SAMI ",train_input_fn)
         self.train_tdf = iter(train_input_fn(train_params)) \
                             if train_input_fn else None
         eval_params = dict(self.params.values(), batch_size=self.params.eval_batch_size)
@@ -938,7 +954,7 @@ class TapeModel(object):
         loss_dict = self.train_step(features, labels, b_w, b_o)
         prediction = self.predict(features)
     
-    def train_epoch(self, steps, broadcast=False):
+    def train_epoch(self, steps, broadcast=False,profile=None):
         if MPI_rank()==0:
             logging.info("Starting training loop")
             p_bar = tqdm(range(steps), file=sys.stdout, 
@@ -946,23 +962,58 @@ class TapeModel(object):
             loss_history = []
         else:
             p_bar = range(steps)
-        for i in p_bar:
-            if broadcast and i==0:
-                b_w, b_o = True, True
-            elif i==0:
-                b_w, b_o = False, True
-            else:
-                b_w, b_o = False, False
-            features, labels = next(self.train_tdf)
-            b_w = tf.convert_to_tensor(b_w)
-            b_o = tf.convert_to_tensor(b_o)
-            loss_dict = self.train_step(features, labels, b_w, b_o)
-            if MPI_rank()==0:
-                loss_history.append(loss_dict['total_loss'].numpy())
-                step = self.optimizer.iterations
-                learning_rate = self.schedule(step)
-                p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
-                                                                          learning_rate))
+        times=[]
+
+        if MPI_rank()==0 and profile is not None:
+            logging.info(f"Saving profile to {profile}")
+            tf_profiler.start(profile)
+            for i in p_bar:
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                with prof_Trace(f"Step-",step_num=i,_r=1):
+                    tstart=time.perf_counter()
+                    features, labels = next(self.train_tdf)
+                    loss_dict = self.train_step(features, labels, b_w, b_o)
+                    times.append(time.perf_counter()-tstart)
+                if MPI_rank()==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
+            tf_profiler.stop()
+        else:
+            runtype="TrainStep"
+            for i in p_bar:
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                tstart=time.perf_counter()
+                step_token=nvtx.push(f"{runtype}-{i}",runtype)
+                features, labels = next(self.train_tdf)
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                loss_dict = self.train_step(features, labels, b_w, b_o)
+                times.append(time.perf_counter()-tstart)
+                nvtx.pop(step_token)
+                if MPI_rank()==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
+
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[1:])*1000.} +/- {np.std(times[1:])*1000.} ms")
     @tf.function            
     def predict(self, features):
         labels = None

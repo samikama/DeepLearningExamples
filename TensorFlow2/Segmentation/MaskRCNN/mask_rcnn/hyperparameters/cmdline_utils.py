@@ -214,6 +214,18 @@ def define_hparams_flags():
         help='Enable Batched NMS at inference.'
     )
 
+    flags.DEFINE_string(
+        'profile_path',
+        default=None,
+        help='path for the profile output'
+    )
+
+    flags.DEFINE_bool(
+        'use_default_roi_align',
+        default=True,
+        help='Use default ROIAlign implementation.'
+    )
+
     flags.DEFINE_bool(
         'use_custom_box_proposals_op',
         default=False,

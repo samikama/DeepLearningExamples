@@ -16,6 +16,7 @@
 BATCH_SIZE=1
 HOST_COUNT=1
 GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
+NUM_GPUS=${NUM_GPUS:-${GPU_COUNT}}
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
 STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
@@ -27,19 +28,21 @@ LR_MULTIPLIER=0.001
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
 
-source activate mask_rcnn
+#source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+#PROFILE_PATH="--profile_path ${BASEDIR}/../Profiles/TapeSingleHost"
+
 rm -rf $BASEDIR/../baseline_1x_tape
 mkdir -p $BASEDIR/../baseline_1x_tape
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    -np $GPU_COUNT -H localhost:$GPU_COUNT \
+    -np ${NUM_GPUS} -H localhost:${NUM_GPUS} \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
-    /home/ubuntu/anaconda3/envs/mask_rcnn/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train" \
         --eval_after_training=0\
         --loop_mode="tape" \
@@ -54,7 +57,7 @@ mkdir -p $BASEDIR/../baseline_1x_tape
         --model_dir="$BASEDIR/../baseline_1x_tape" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1000 \
+        --warmup_steps=100 \
         --global_gradient_clip_ratio=0.0 \
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
@@ -70,4 +73,5 @@ mkdir -p $BASEDIR/../baseline_1x_tape
         --tf2 \
         --async_eval \
         --use_ext \
+        ${PROFILE_PATH} \
         --use_custom_box_proposals_op | tee $BASEDIR/../baseline_1x/baseline_1x.log

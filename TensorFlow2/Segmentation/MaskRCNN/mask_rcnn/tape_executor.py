@@ -33,18 +33,23 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     eval_workers = min(MPI_size(), 32)
     # eval_workers = MPI_size()
     start_time = time.time()
+    eval_each_step=False
     if run_config.mode.lower() == "train_and_eval":
         eval_each_step=True
+    profile_path=None
+    if run_config.profile_path:
+        profile_path=run_config.profile_path
+    logging.info("SAMI SAMI SAMI Profile path is {}".format(profile_path))
     for epoch in range(run_config.first_eval):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
             mpi_size = MPI_size()
             logging.info("Number of GPUs {}".format(mpi_size))
-        mrcnn_model.train_epoch(run_config.num_steps_per_eval)
+        mrcnn_model.train_epoch(min(run_config.num_steps_per_eval,run_config.total_steps),profile=f"{profile_path}_{epoch}" if profile_path else None)
     for epoch in range(run_config.first_eval, total_epochs):
         if MPI_rank()==0:
             logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-        mrcnn_model.train_epoch(run_config.num_steps_per_eval)
+        mrcnn_model.train_epoch(min(run_config.num_steps_per_eval,run_config.total_steps),profile=f"{profile_path}_{epoch}" if profile_path else None)
         if eval_each_step:
             if MPI_rank()==0:
                 logging.info("Running epoch {} evaluation on {} workers".format(epoch+1, eval_workers))

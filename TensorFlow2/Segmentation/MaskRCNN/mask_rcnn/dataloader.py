@@ -78,7 +78,10 @@ class InputReader(object):
     def __call__(self, params, input_context=None):
 
         batch_size = params['batch_size'] if 'batch_size' in params else 1
-        do_dist_eval = params['dist_eval']
+        do_dist_eval = params.get('dist_eval',False)
+        
+        for i in sorted(params.items(),key=lambda x:x[0]):
+            logging.info(f"{i[0]}: {i[1]}")
         
         try:
             seed = params['seed'] if not MPI_is_distributed() else params['seed'] * MPI_rank()
@@ -223,10 +226,10 @@ class InputReader(object):
             else:
                 data_options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
             # data_options.experimental_distribute.auto_shard = False
-            data_options.experimental_slack = params['data_slack']
+            data_options.experimental_slack = params.get('data_slack',False)
 
-            #data_options.experimental_threading.max_intra_op_parallelism = 1
-            data_options.experimental_threading.private_threadpool_size = 3
+            data_options.experimental_threading.max_intra_op_parallelism = 2
+            data_options.experimental_threading.private_threadpool_size = 4
 
             # ================= experimental_optimization ================= #
 
@@ -309,9 +312,6 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = '0'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-    tf.compat.v1.disable_eager_execution()
-
-    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.set_verbosity(logging.INFO)
 
     parser = argparse.ArgumentParser(description="MaskRCNN Dataloader Benchmark")
@@ -349,13 +349,16 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--training", default=False, action="store_true", help="Benchmark in training mode")
-
+    parser.add_argument("--tf2", default=False, action="store_true", help="Run TF2 mode")
     parser.add_argument("--use_synthetic_data", default=False, action="store_true", help="Use synthetic dataset")
     
     parser.add_argument("--dist_eval", default=False, action="store_true", help="Do distributed evaluation")
 
     FLAGS, unknown_args = parser.parse_known_args()
+    if not FLAGS.tf2:
+        tf.compat.v1.disable_eager_execution()
 
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     if len(unknown_args) > 0:
 
         for bad_arg in unknown_args:
@@ -395,102 +398,107 @@ if __name__ == "__main__":
     time.sleep(1)
 
     # Build the data input
+    ds_params={
+        "anchor_scale": 8.0,
+        "aspect_ratios": [[1.0, 1.0], [1.4, 0.7], [0.7, 1.4]],
+        "batch_size": FLAGS.batch_size,
+        "gt_mask_size": 112,
+        "image_size": [1024, 1024],
+        "include_groundtruth_in_features": False,
+        "augment_input_data": True,
+        "max_level": 6,
+        "min_level": 2,
+        "num_classes": 91,
+        "num_scales": 1,
+        "rpn_batch_size_per_im": 256,
+        "rpn_fg_fraction": 0.5,
+        "rpn_min_size": 0.,
+        "rpn_nms_threshold": 0.7,
+        "rpn_negative_overlap": 0.3,
+        "rpn_positive_overlap": 0.7,
+        "rpn_post_nms_topn": 1000,
+        "rpn_pre_nms_topn": 2000,
+        "skip_crowd_during_training": True,
+        "use_category": True,
+        "visualize_images_summary": False,
+        "disable_options":False
+
+    }
+    ds_params["image_size"]=[832,1344]
+
     dataset = input_dataset(
-        params={
-            "anchor_scale": 8.0,
-            "aspect_ratios": [[1.0, 1.0], [1.4, 0.7], [0.7, 1.4]],
-            "batch_size": FLAGS.batch_size,
-            "gt_mask_size": 112,
-            "image_size": [1024, 1024],
-            "include_groundtruth_in_features": False,
-            "augment_input_data": True,
-            "max_level": 6,
-            "min_level": 2,
-            "num_classes": 91,
-            "num_scales": 1,
-            "rpn_batch_size_per_im": 256,
-            "rpn_fg_fraction": 0.5,
-            "rpn_min_size": 0.,
-            "rpn_nms_threshold": 0.7,
-            "rpn_negative_overlap": 0.3,
-            "rpn_positive_overlap": 0.7,
-            "rpn_post_nms_topn": 1000,
-            "rpn_pre_nms_topn": 2000,
-            "skip_crowd_during_training": True,
-            "use_category": True,
-            "visualize_images_summary": False,
-        }
+        params=ds_params
     )
 
-    dataset_iterator = dataset.make_initializable_iterator()
-
-    if FLAGS.training:
-        X, Y = dataset_iterator.get_next()
-    else:
-        X = dataset_iterator.get_next()
-
-    config = tf.compat.v1.ConfigProto()
-    config.gpu_options.allow_growth = True
-    config.log_device_placement = False
-
-    with tf.device("gpu:0"):
-
-        X_gpu_ops = list()
-        Y_gpu_ops = list()
+    if not FLAGS.tf2:
+        dataset_iterator = dataset.make_initializable_iterator()
 
         if FLAGS.training:
-
-            for _, _x in X.items():
-                X_gpu_ops.append(tf.identity(_x))
-
-            for _, _y in Y.items():
-                Y_gpu_ops.append(tf.identity(_y))
-
+            X, Y = dataset_iterator.get_next()
         else:
+            X = dataset_iterator.get_next()
 
-            for _, _x in X["features"].items():
-                X_gpu_ops.append(tf.identity(_x))
+        config = tf.compat.v1.ConfigProto()
+        config.gpu_options.allow_growth = True
+        config.log_device_placement = False
 
-        with tf.control_dependencies(X_gpu_ops + Y_gpu_ops):
-            input_op = tf.constant(1.0)
+        with tf.device("gpu:0"):
 
-        with tf.compat.v1.Session(config=config) as sess:
+            X_gpu_ops = list()
+            Y_gpu_ops = list()
 
-            sess.run(dataset_iterator.initializer)
+            if FLAGS.training:
 
-            sess.run(tf.compat.v1.global_variables_initializer())
+                for _, _x in X.items():
+                    X_gpu_ops.append(tf.identity(_x))
 
-            total_files_processed = 0
+                for _, _y in Y.items():
+                    Y_gpu_ops.append(tf.identity(_y))
 
-            img_per_sec_arr = []
-            processing_time_arr = []
+            else:
 
-            processing_start_time = time.time()
+                for _, _x in X["features"].items():
+                    X_gpu_ops.append(tf.identity(_x))
 
-            for step in range(TOTAL_STEPS):
+            with tf.control_dependencies(X_gpu_ops + Y_gpu_ops):
+                input_op = tf.constant(1.0)
 
-                try:
+            with tf.compat.v1.Session(config=config) as sess:
 
-                    start_time = time.time()
-                    sess.run(input_op)
-                    elapsed_time = (time.time() - start_time) * 1000
+                sess.run(dataset_iterator.initializer)
 
-                    imgs_per_sec = (FLAGS.batch_size / elapsed_time) * 1000
-                    total_files_processed += FLAGS.batch_size
+                sess.run(tf.compat.v1.global_variables_initializer())
 
-                    if (step + 1) > BURNIN_STEPS:
-                        processing_time_arr.append(elapsed_time)
-                        img_per_sec_arr.append(imgs_per_sec)
+                total_files_processed = 0
 
-                    if (step + 1) % 20 == 0 or (step + 1) == TOTAL_STEPS:
-                        print(
-                            "[STEP %04d] # Batch Size: %03d - Time: %03d msecs - Speed: %6d img/s" %
-                            (step + 1, FLAGS.batch_size, elapsed_time, imgs_per_sec)
-                        )
+                img_per_sec_arr = []
+                processing_time_arr = []
 
-                except tf.errors.OutOfRangeError:
-                    break
+                processing_start_time = time.time()
 
+                for step in range(TOTAL_STEPS):
+
+                    try:
+
+                        start_time = time.time()
+                        sess.run(input_op)
+                        elapsed_time = (time.time() - start_time) * 1000
+
+                        imgs_per_sec = (FLAGS.batch_size / elapsed_time) * 1000
+                        total_files_processed += FLAGS.batch_size
+
+                        if (step + 1) > BURNIN_STEPS:
+                            processing_time_arr.append(elapsed_time)
+                            img_per_sec_arr.append(imgs_per_sec)
+
+                        if (step + 1) % 20 == 0 or (step + 1) == TOTAL_STEPS:
+                            print(
+                                "[STEP %04d] # Batch Size: %03d - Time: %03d msecs - Speed: %6d img/s" %
+                                (step + 1, FLAGS.batch_size, elapsed_time, imgs_per_sec)
+                            )
+
+                    except tf.errors.OutOfRangeError:
+                        break
             processing_time = time.time() - processing_start_time
 
             avg_processing_speed = np.mean(img_per_sec_arr)
@@ -504,3 +512,51 @@ if __name__ == "__main__":
             print("\t=> Median Time per step: %3d msecs" % np.median(processing_time_arr))
             print("\t=> Median Processing Speed: %d images/secs" % np.median(img_per_sec_arr))
             print("\t=> Median Processing Time: %.2f msecs/image" % (1 / float(np.median(img_per_sec_arr)) * 1000))
+
+    else:
+        data_iter=iter(dataset)
+        total_files_processed = 0
+        log_step=100
+        img_per_sec_arr = []
+        processing_time_arr = []
+        processing_start_time=time.perf_counter()
+        for step in range(TOTAL_STEPS):
+            curr_time=time.perf_counter()
+            try:
+                features=next(data_iter)
+            except:
+                break
+            now=time.perf_counter()
+            elapsed_time=now-curr_time
+            imgs_per_sec = (FLAGS.batch_size / elapsed_time) #in seconds
+            total_files_processed += FLAGS.batch_size
+
+            if (step + 1) > BURNIN_STEPS:
+                processing_time_arr.append(elapsed_time*1000.) # in msec
+                img_per_sec_arr.append(imgs_per_sec)
+            if (step + 1) % log_step == 0 or (step + 1) == TOTAL_STEPS:
+                if (step+1)>=BURNIN_STEPS+log_step:
+                    print(
+                        "[STEP %04d] # Batch Size: %03d - Time: %6.3f msecs - Speed: %6.2f img/s" %
+                        (step + 1, FLAGS.batch_size, np.mean(processing_time_arr[-log_step:])/log_step, np.mean(img_per_sec_arr[-log_step:])/log_step)
+                    )
+                else:
+                    print(
+                        "[STEP %04d] # Batch Size: %03d - Time: %06.3f msecs - Speed: %6.2f img/s" %
+                        (step + 1, FLAGS.batch_size, elapsed_time*1000., imgs_per_sec)
+                    )
+            
+        processing_time = time.perf_counter() - processing_start_time
+        avg_processing_speed = np.mean(img_per_sec_arr)
+
+        print("\n###################################################################")
+        print("*** Data Loading Performance Metrics ***\n")
+        print("\t=> Number of Steps: %s" % (step + 1))
+        print("\t=> Batch Size: %s" % FLAGS.batch_size)
+        print("\t=> Files Processed: %s" % total_files_processed)
+        print("\t=> Total Execution Time: %s secs" % processing_time)
+        print("\t=> Median Time per step: %s msecs" % np.median(processing_time_arr))
+        print("\t=> Average Time per batch: %s +/- %s msecs" %( np.mean(processing_time_arr),np.std(processing_time_arr)))
+        print("\t=> Median Processing Speed: %s images/secs" % np.median(img_per_sec_arr))
+        print("\t=> Median Processing Time: %s msecs/image" % (1 / float(np.median(img_per_sec_arr)) * 1000))
+        
