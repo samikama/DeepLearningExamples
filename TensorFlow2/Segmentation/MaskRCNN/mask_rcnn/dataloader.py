@@ -26,7 +26,7 @@ import functools
 import math
 import multiprocessing
 import glob
-
+from mpi4py import MPI
 import tensorflow as tf
 
 from mask_rcnn.utils.logging_formatter import logging
@@ -228,7 +228,7 @@ class InputReader(object):
             # data_options.experimental_distribute.auto_shard = False
             data_options.experimental_slack = params.get('data_slack',False)
 
-            data_options.experimental_threading.max_intra_op_parallelism = 2
+            #data_options.experimental_threading.max_intra_op_parallelism = 1
             data_options.experimental_threading.private_threadpool_size = 4
 
             # ================= experimental_optimization ================= #
@@ -302,6 +302,17 @@ if __name__ == "__main__":
 
     # --------------- #
     '''
+    try:
+        from tensorflow.python import _pywrap_nvtx as nvtx
+    except ImportError:
+        class DummyNvtx:
+            def __init__(self):
+                pass
+            def push(self,a=None,b=None):
+                pass
+            def pop(self,a=None):
+                pass
+        nvtx=DummyNvtx()
 
     import os
     import time
@@ -309,8 +320,12 @@ if __name__ == "__main__":
 
     import numpy as np
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = '0'
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES",str(MPI.COMM_WORLD.Get_rank()%8))
+    #os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
+    os.environ['TF_GPU_THREAD_COUNT'] = '1'
+    os.environ["TF_NUM_INTRAOP_THREADS"]="2"
+    os.environ["TF_NUM_INTEROP_THREADS"]="10"
 
     logging.set_verbosity(logging.INFO)
 
@@ -523,7 +538,9 @@ if __name__ == "__main__":
         for step in range(TOTAL_STEPS):
             curr_time=time.perf_counter()
             try:
+                r=nvtx.push(f"DataFetch-{step}",f"DataFetch-{step}")
                 features=next(data_iter)
+                nvtx.pop(r)
             except:
                 break
             now=time.perf_counter()
