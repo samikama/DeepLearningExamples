@@ -53,9 +53,9 @@ mkdir -p $BASEDIR/../results_tf2_32x_novo_$1
         --eval_batch_size=1 \
         --dist_eval \
 	--first_eval=15 \
-        --training_file_pattern="/shared/data2/train*.tfrecord" \
-        --validation_file_pattern="/shared/data2/val*.tfrecord" \
-        --val_json_file="/shared/data2/annotations/instances_val2017.json" \
+        --training_file_pattern="/home/ubuntu/data2/train*.tfrecord" \
+        --validation_file_pattern="/home/ubuntu/data2/val*.tfrecord" \
+        --val_json_file="/home/ubuntu/data2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \

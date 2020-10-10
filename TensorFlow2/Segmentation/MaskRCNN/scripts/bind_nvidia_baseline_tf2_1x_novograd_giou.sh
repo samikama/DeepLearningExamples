@@ -17,8 +17,7 @@ conda_path=/shared/sami/conda
 source $conda_path/etc/profile.d/conda.sh
 conda activate base
 
-#DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
-DIRECT_LAUNCH=1
+DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
 PROFILE_PATH="--profile_path ${BASEDIR}/../Profiles/TapeSingleHost"
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
