@@ -555,7 +555,7 @@ if __name__ == "__main__":
                 if (step+1)>=BURNIN_STEPS+log_step:
                     print(
                         "[STEP %04d] # Batch Size: %03d - Time: %6.3f msecs - Speed: %6.2f img/s" %
-                        (step + 1, FLAGS.batch_size, np.mean(processing_time_arr[-log_step:])/log_step, np.mean(img_per_sec_arr[-log_step:])/log_step)
+                        (step + 1, FLAGS.batch_size, np.mean(processing_time_arr[-log_step:]), np.mean(img_per_sec_arr[-log_step:]))
                     )
                 else:
                     print(
