@@ -324,8 +324,8 @@ if __name__ == "__main__":
     #os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
     os.environ['TF_GPU_THREAD_COUNT'] = '1'
-    os.environ["TF_NUM_INTRAOP_THREADS"]="2"
-    os.environ["TF_NUM_INTEROP_THREADS"]="10"
+    #os.environ["TF_NUM_INTRAOP_THREADS"]="2"
+    #os.environ["TF_NUM_INTEROP_THREADS"]="10"
 
     logging.set_verbosity(logging.INFO)
 

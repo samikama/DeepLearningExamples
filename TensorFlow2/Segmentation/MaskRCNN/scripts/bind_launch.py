@@ -75,7 +75,7 @@ def parse_args():
   parser.add_argument('--direct_launch',
                       nargs='?',
                       const=True,
-                      default=True,
+                      default=False,
                       type=strAsBool,
                       help='Flag to disable numactl launch')
 
