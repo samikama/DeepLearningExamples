@@ -38,12 +38,16 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn)
     mrcnn_model.initialize_model()
     eval_workers = min(MPI_size(is_herring()), 32)
-    
-    if run_config.offload_eval:
-        for epoch in range(run_config.first_eval, total_epochs):
+
+    profile_path=None
+    if run_config.profile_path:
+        profile_path=run_config.profile_path
+    #if run_config.offload_eval:
+    if True:
+        for epoch in range(total_epochs):
             if MPI_rank(is_herring())==0:
                 logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0, profile=f"{profile_path}_{epoch}" if profile_path else None)
     
     else:
         for epoch in range(run_config.first_eval):

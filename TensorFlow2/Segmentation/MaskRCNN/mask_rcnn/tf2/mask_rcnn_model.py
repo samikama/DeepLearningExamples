@@ -67,7 +67,19 @@ from mask_rcnn.tf2.utils import warmup_scheduler, eager_mapping
 from mask_rcnn.utils.meters import StandardMeter
 from mask_rcnn.utils.metric_tracking import register_metric
 from mask_rcnn.utils.herring_env import is_herring
-
+from tensorflow.python.profiler import profiler_v2 as tf_profiler
+from tensorflow.python.profiler.trace import Trace as prof_Trace
+try:
+    from tensorflow.python import _pywrap_nvtx as nvtx
+except ImportError:
+    class DummyNvtx:
+        def __init__(self):
+            pass
+        def push(self,a=None,b=None):
+            pass
+        def pop(self,a=None):
+            pass
+    nvtx=DummyNvtx()
 
 if is_herring():
     import herring.tensorflow as herring
@@ -1002,7 +1014,7 @@ class TapeModel(object):
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
     
-    def train_epoch(self, steps, broadcast=False):
+    def train_epoch(self, steps, broadcast=False, profile=None):
         if MPI_rank(is_herring())==0:
             logging.info("Starting training loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
@@ -1010,36 +1022,59 @@ class TapeModel(object):
         else:
             p_bar = range(steps)
 
-        timings=[]
-        for i in p_bar:
-            if broadcast and i==0:
-                b_w, b_o = True, True
-            elif i==0:
-                b_w, b_o = False, True
-            else:
-                b_w, b_o = False, False
-            
-            tstart = time.perf_counter()
-            features, labels = next(self.train_tdf)
-            loss_dict = self.train_step(features, labels, b_w, b_o)
+        times=[]
 
-            delta_t = time.perf_counter() - tstart
-            timings.append(delta_t)
-            if MPI_rank(is_herring())==0:
-                loss_history.append(loss_dict['total_loss'].numpy())
-                step = self.optimizer.iterations
-                learning_rate = self.schedule(step)
-                p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
-                                                                          learning_rate))
-            #if i%500 == 0:
-            #    timings = np.asarray(timings, np.float)
-            #    print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
-            #    timings = []
-        if MPI_rank(is_herring()) == 0:
-            print("Saving checkpoint...")
-            self.epoch_num+=1
-            self.save_model()
-            
+        if MPI_rank(is_herring())==0 and profile is not None:
+            logging.info(f"Saving profile to {profile}")
+            tf_profiler.start(profile)
+            for i in p_bar:
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                with prof_Trace(f"Step-",step_num=i,_r=1):
+                    tstart=time.perf_counter()
+                    features, labels = next(self.train_tdf)
+                    loss_dict = self.train_step(features, labels, b_w, b_o)
+                    times.append(time.perf_counter()-tstart)
+                if MPI_rank(is_herring())==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
+            tf_profiler.stop()
+        else:
+            runtype="TrainStep"
+            for i in p_bar:
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                tstart=time.perf_counter()
+                step_token=nvtx.push(f"{runtype}-{i}",runtype)
+                features, labels = next(self.train_tdf)
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                loss_dict = self.train_step(features, labels, b_w, b_o)
+                times.append(time.perf_counter()-tstart)
+                nvtx.pop(step_token)
+                if MPI_rank(is_herring())==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
+
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[1:])*1000.} +/- {np.std(times[1:])*1000.} ms")            
+
     def get_latest_checkpoint(self):
         try:
             return sorted([_ for _ in os.listdir(self.model_dir) if _.endswith(".h5")])[-1]

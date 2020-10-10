@@ -17,13 +17,13 @@ conda_path=/shared/sami/conda
 source $conda_path/etc/profile.d/conda.sh
 conda activate base
 
-
+DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
 PROFILE_PATH="--profile_path ${BASEDIR}/../Profiles/TapeSingleHost"
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tf2_32x_novo_$1
 mkdir -p $BASEDIR/../results_tf2_32x_novo_$1
-/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
+/opt/amazon/openmpi/bin/mpirun  --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     --hostfile /shared/mzanur/hosts_32x \
     -N 8 \
@@ -31,7 +31,8 @@ mkdir -p $BASEDIR/../results_tf2_32x_novo_$1
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
-    /shared/sami/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    --bind-to none \
+    /shared/sami/conda/bin/python ${BASEDIR}/bind_launch.py  --direct_launch=${DIRECT_LAUNCH} --nproc_per_node=8 --nsockets_per_node=2 --ncores_per_socket=24 ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
 	--loop_mode="tape" \
 	--box_loss_type="giou" \

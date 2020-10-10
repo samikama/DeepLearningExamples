@@ -90,7 +90,21 @@ def define_hparams_flags():
             ' from input by setting `include_groundtruth_in_features`=True'
         )
     )
-    
+
+
+    flags.DEFINE_string(
+        'profile_path',
+        default=None,
+        help='path for the profile output'
+    )
+
+    flags.DEFINE_bool(
+        'use_default_roi_align',
+        default=True,
+        help='Use default ROIAlign implementation.'
+    )
+
+
     flags.DEFINE_bool(
         'dist_eval',
         default=False,
