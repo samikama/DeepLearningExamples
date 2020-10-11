@@ -23,6 +23,7 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         gpus = tf.config.list_physical_devices('GPU')
         if gpus:
             tf.config.set_visible_devices(gpus[herring.local_rank()], 'GPU')
+        #os.environ["CUDA_VISIBLE_DEVICES"] = str(herring.local_rank())
     else:
         if MPI_is_distributed(False):
             import horovod.tensorflow as hvd
@@ -44,10 +45,10 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         profile_path=run_config.profile_path
     #if run_config.offload_eval:
     if True:
-        for epoch in range(total_epochs):
+        for epoch in range(1):
             if MPI_rank(is_herring())==0:
                 logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0, profile=f"{profile_path}_{epoch}" if profile_path else None)
+            mrcnn_model.train_epoch(run_config.total_steps, broadcast=epoch==0, profile=f"{profile_path}_{epoch}" if profile_path else None)
     
     else:
         for epoch in range(run_config.first_eval):
