@@ -18,14 +18,14 @@ source $conda_path/etc/profile.d/conda.sh
 conda activate base
 
 
+BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 PROFILE_PATH="--profile_path ${BASEDIR}/../Profiles/TapeSingleHost"
 
-BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tf2_32x_novo_$1
 mkdir -p $BASEDIR/../results_tf2_32x_novo_$1
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile /shared/mzanur/hosts_32x \
+    --hostfile /shared/mzanur/hosts_8x \
     -N 8 \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
@@ -42,12 +42,12 @@ mkdir -p $BASEDIR/../results_tf2_32x_novo_$1
         --optimizer_type="Novograd" \
         --lr_schedule="cosine" \
         --model_dir="$BASEDIR/../results_tf2_32x_novo_$1" \
-        --num_steps_per_eval=462 \
+        --num_steps_per_eval=500 \
         --warmup_learning_rate=0.000133 \
 	--beta1=0.9 \
 	--beta2=0.5 \
-	--warmup_steps=300 \
-        --total_steps=7500 \
+	--warmup_steps=200 \
+        --total_steps=200 \
         --l2_weight_decay=1e-3 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
@@ -60,5 +60,4 @@ mkdir -p $BASEDIR/../results_tf2_32x_novo_$1
         --use_batched_nms \
         --xla \
         --tf2 \
-	${PROFILE_PATH} \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_32x_novo_$1/train_eval.log
