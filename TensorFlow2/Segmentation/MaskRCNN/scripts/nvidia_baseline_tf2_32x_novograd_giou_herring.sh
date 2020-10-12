@@ -21,9 +21,8 @@ mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
 DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
 
 /shared/sami/conda/bin/herringrun_profile -n 8 --homogeneous -c /shared/sami/conda \
-    -x LD_LIBRARY_PATH \
-    -x PATH \
-    RUN_HERRING=1 /shared/sami/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+	RUN_HERRING=1 \
+	/shared/sami/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
 	--loop_mode="tape" \
 	--box_loss_type="giou" \

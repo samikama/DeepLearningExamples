@@ -29,11 +29,10 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
 
-
-for k, v in os.environ.items():
-    print(f'{k} : {v}')
-
-print("#"*20)
+#for k,v in os.environ.items():
+#    print(f'{k} : {v}')
+#print()
+#print("#"*50)
 
 from absl import app
 
@@ -41,9 +40,18 @@ import tensorflow as tf
 from tensorflow.python.framework.ops import disable_eager_execution
 from mask_rcnn.utils.herring_env import is_herring
 
+
+#os.environ['CUDA_VISIBLE_DEVICES'] =  str(os.environ.get("OMPI_COMM_WORLD_LOCAL_RANK"))
+
+print(os.environ['CUDA_VISIBLE_DEVICES'])
 if is_herring():
     import herring.tensorflow as herring
     herring.init()
+from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_local_rank, MPI_is_distributed
+
+
+#os.environ['CUDA_VISIBLE_DEVICES'] = str(MPI_local_rank(is_herring()))
+
 from mask_rcnn.utils.logging_formatter import logging
 
 from mask_rcnn import dataloader
@@ -63,7 +71,8 @@ import dllogger
 
 FLAGS = define_hparams_flags()
 
-from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
+
+
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
     mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1
