@@ -936,7 +936,23 @@ class TapeModel(object):
                 gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
             else:
                 gradients = tape.gradient(loss_dict['total_loss'], self.forward.trainable_variables)
-            self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
+            global_gradient_clip_ratio = self.params.global_gradient_clip_ratio
+            if global_gradient_clip_ratio > 0.0:
+                all_are_finite = tf.reduce_all([tf.reduce_all(tf.math.is_finite(g)) for g in gradients])
+                (clipped_grads, _) = tf.clip_by_global_norm(gradients, clip_norm=global_gradient_clip_ratio,
+                                use_norm=tf.cond(all_are_finite, lambda: tf.linalg.global_norm(gradients), lambda: tf.constant(1.0)))
+                gradients = clipped_grads
+        
+            grads_and_vars = []
+            # Special treatment for biases (beta is named as bias in reference model)
+            # Reference: https://github.com/ddkang/Detectron/blob/80f3295308/lib/modeling/optimizer.py#L109
+            for grad, var in zip(gradients, self.forward.trainable_variables):
+                if grad is not None and any([pattern in var.name for pattern in ["bias", "beta"]]):
+                    grad = 2.0 * grad
+                grads_and_vars.append((grad, var))
+
+            # self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
+            self.optimizer.apply_gradients(grads_and_vars)
             if MPI_is_distributed(True) and sync_weights:
                 if MPI_rank(True)==0:
                     logging.info("Broadcasting variables")
