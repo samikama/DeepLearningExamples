@@ -25,6 +25,7 @@ from distutils.version import LooseVersion
 
 import tensorflow as tf
 from mask_rcnn.utils import box_utils
+import math 
 
 DEBUG_LOSS_IMPLEMENTATION = False
 
@@ -80,6 +81,78 @@ def _calculate_giou(b1, b2, mode="giou"):
     return giou
 
 
+def _calculate_ciou(b1, b2, mode="diou"):
+    """
+    Args:
+        b1: bounding box. The coordinates of the each bounding box in boxes are
+            encoded as [y_min, x_min, y_max, x_max].
+        b2: the other bounding box. The coordinates of the each bounding box
+            in boxes are encoded as [y_min, x_min, y_max, x_max].
+        mode: one of ['diou', 'ciou'], decided to calculate GIoU or IoU loss.
+    Returns:
+        GIoU loss float `Tensor`.
+    """
+    zero = tf.convert_to_tensor(0.0, b1.dtype)
+
+    b1_ymin, b1_xmin, b1_ymax, b1_xmax = tf.unstack(b1, 4, axis=-1)
+    b2_ymin, b2_xmin, b2_ymax, b2_xmax = tf.unstack(b2, 4, axis=-1)
+    b1_width = tf.maximum(zero, b1_xmax - b1_xmin)
+    b1_height = tf.maximum(zero, b1_ymax - b1_ymin)
+    b2_width = tf.maximum(zero, b2_xmax - b2_xmin)
+    b2_height = tf.maximum(zero, b2_ymax - b2_ymin)
+    b1_area = b1_width * b1_height
+    b2_area = b2_width * b2_height
+
+    intersect_ymin = tf.maximum(b1_ymin, b2_ymin)
+    intersect_xmin = tf.maximum(b1_xmin, b2_xmin)
+    intersect_ymax = tf.minimum(b1_ymax, b2_ymax)
+    intersect_xmax = tf.minimum(b1_xmax, b2_xmax)
+    intersect_width = tf.maximum(zero, intersect_xmax - intersect_xmin)
+    intersect_height = tf.maximum(zero, intersect_ymax - intersect_ymin)
+    intersect_area = intersect_width * intersect_height
+
+    union_area = b1_area + b2_area - intersect_area
+    iou = tf.math.divide_no_nan(intersect_area, union_area)
+    if mode == "iou":
+        return iou
+
+    enclose_ymin = tf.minimum(b1_ymin, b2_ymin)
+    enclose_xmin = tf.minimum(b1_xmin, b2_xmin)
+    enclose_ymax = tf.maximum(b1_ymax, b2_ymax)
+    enclose_xmax = tf.maximum(b1_xmax, b2_xmax)
+    enclose_width = tf.maximum(zero, enclose_xmax - enclose_xmin)
+    enclose_height = tf.maximum(zero, enclose_ymax - enclose_ymin)
+    enclose_area = enclose_width * enclose_height
+
+    if mode == "giou":
+        giou = iou - tf.math.divide_no_nan((enclose_area - union_area), enclose_area)
+        return giou
+
+    # CIoU - https://arxiv.org/pdf/1911.08287.pdf
+    diag_length = tf.linalg.norm([enclose_height, enclose_width]) # tf.math.square(enclose_width) + tf.math.square(enclose_height)
+    b1_center = tf.stack([(b1_ymin + b1_ymax) / 2., (b1_xmin + b1_xmax) / 2.])
+    b2_center = tf.stack([(b2_ymin + b2_ymax) / 2., (b2_xmin + b2_xmax) / 2.])
+    centers_dist = tf.linalg.norm([b1_center-b2_center])
+
+    diou = iou - tf.math.divide_no_nan(centers_dist**2, diag_length**2)
+
+    if mode == "diou":
+        return diou
+
+    arctan = tf.atan(tf.math.divide_no_nan(b1_width, b1_height)) - tf.atan(tf.math.divide_no_nan(b2_width, b2_height))
+    v = 4.0 * ((arctan / math.pi) ** 2)
+
+    # apply aspect ratio penalty only if IoU > 0.5 and GT box is in medium or large category
+    # aspect_penalty_mask = tf.cast(tf.math.logical_and(iou > 0.5, b1_area > 1024.), b1.dtype) # don't know size of box after resize!
+    aspect_penalty_mask = tf.cast(iou > 0.5, b1.dtype)
+    alpha = aspect_penalty_mask * tf.math.divide_no_nan(v, 1.0 - iou + v)
+
+    ciou = diou - alpha * v
+
+    return ciou
+
+
+
 def _giou_loss(y_true, y_pred, weights):
     y_pred = tf.cast(y_pred, tf.float32)
     y_true = tf.cast(y_true, y_pred.dtype)
@@ -93,6 +166,22 @@ def _giou_loss(y_true, y_pred, weights):
     giou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(giou_loss), tf.math.count_nonzero(weights, dtype=tf.float32))
     assert giou_loss.dtype == tf.float32
     return giou_loss
+
+
+def _ciou_loss(y_true, y_pred, weights):
+    y_pred = tf.cast(y_pred, tf.float32)
+    y_true = tf.cast(y_true, y_pred.dtype)
+    weights = tf.cast(weights, tf.float32)
+    y_true = tf.reshape(y_true, [-1, 4])
+    y_pred = tf.reshape(y_pred, [-1, 4])
+    weights = tf.reshape(weights, [-1, 4])
+    ciou = _calculate_ciou(b1=y_true, b2=y_pred, mode="ciou")
+    ciou_loss = 1. - ciou
+
+    ciou_loss = tf.tile(tf.expand_dims(ciou_loss, -1), [1, 4]) * weights # only take pos example contributions
+    ciou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(ciou_loss), tf.math.count_nonzero(weights, dtype=tf.float32))
+    assert ciou_loss.dtype == tf.float32
+    return ciou_loss
 
 
 def _l1_loss(y_true, y_pred, weights, delta=0.0):
@@ -159,14 +248,21 @@ def _huber_loss(y_true, y_pred, weights, delta):
     return huber_loss
 
 
-def _sigmoid_cross_entropy(multi_class_labels, logits, weights, sum_by_non_zeros_weights=False):
+def _sigmoid_cross_entropy(multi_class_labels, logits, weights, sum_by_non_zeros_weights=False, label_smoothing=0.0):
 
     assert weights.dtype == tf.float32
 
-    sigmoid_cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(
-        labels=multi_class_labels,
+#    sigmoid_cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(
+#        labels=multi_class_labels,
+#        logits=logits,
+#        name="x-entropy"
+#    )
+
+    sigmoid_cross_entropy = tf.compat.v1.losses.sigmoid_cross_entropy(
+        multi_class_labels=multi_class_labels,
         logits=logits,
-        name="x-entropy"
+        label_smoothing=label_smoothing,
+        reduction=tf.compat.v1.losses.Reduction.NONE
     )
 
     assert sigmoid_cross_entropy.dtype == tf.float32
@@ -253,7 +349,7 @@ def _softmax_cross_entropy(onehot_labels, logits, label_smoothing=0.0):
     return softmax_cross_entropy
 
 
-def _rpn_score_loss(score_outputs, score_targets, normalizer=1.0):
+def _rpn_score_loss(score_outputs, score_targets, normalizer=1.0, label_smoothing=0.0):
     """Computes score loss."""
 
     with tf.name_scope('rpn_score_loss'):
@@ -276,7 +372,8 @@ def _rpn_score_loss(score_outputs, score_targets, normalizer=1.0):
             multi_class_labels=score_targets,
             logits=score_outputs,
             weights=mask,
-            sum_by_non_zeros_weights=False
+            sum_by_non_zeros_weights=False,
+            label_smoothing=label_smoothing
         )
 
         assert score_loss.dtype == tf.float32
@@ -350,7 +447,8 @@ def rpn_loss(score_outputs, box_outputs, labels, params):
                 _rpn_score_loss(
                     score_outputs=score_outputs[level],
                     score_targets=score_targets_at_level,
-                    normalizer=tf.cast(params['train_batch_size'] * params['rpn_batch_size_per_im'], dtype=tf.float32)
+                    normalizer=tf.cast(params['train_batch_size'] * params['rpn_batch_size_per_im'], dtype=tf.float32),
+                    label_smoothing=params['label_smoothing']
                 )
             )
 
@@ -399,6 +497,8 @@ def _fast_rcnn_box_loss(box_outputs, box_targets, class_targets, loss_type='hube
             box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
         elif loss_type == 'giou':
             box_loss = _giou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask)
+        elif loss_type == 'ciou':
+            box_loss = _ciou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask)
         else:
             # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
             raise NotImplementedError
@@ -466,7 +566,7 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
             tf.reshape(box_outputs, [-1, 4])
         )
 
-        if params['box_loss_type'] == 'giou':
+        if params['box_loss_type'] in ['giou', 'ciou']:
             # decode outputs to move deltas back to coordinate space
             rpn_box_rois = tf.reshape(rpn_box_rois, [-1, 4])
             box_outputs = box_utils.decode_boxes(encoded_boxes=box_outputs, anchors=rpn_box_rois, weights=params['bbox_reg_weights'])
@@ -538,7 +638,8 @@ def mask_rcnn_loss(mask_outputs, mask_targets, select_class_targets, params):
             multi_class_labels=mask_targets,
             logits=mask_outputs,
             weights=weights,
-            sum_by_non_zeros_weights=True
+            sum_by_non_zeros_weights=True,
+            label_smoothing=params['label_smoothing']
         )
 
         mrcnn_loss = params['mrcnn_weight_loss_mask'] * loss
