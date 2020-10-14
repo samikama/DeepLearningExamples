@@ -23,7 +23,13 @@ from __future__ import print_function
 
 import os
 from mpi4py import MPI
-os.environ["CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES",str(MPI.COMM_WORLD.Get_rank()%8))
+CURR_GPU_INDEX=str(MPI.COMM_WORLD.Get_rank()%8)
+from mask_rcnn.utils.herring_env import is_herring
+if is_herring():
+    import herring.tensorflow as herring
+    herring.init()
+    CURR_GPU_INDEX=str(herring.local_rank())
+os.environ["CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES",CURR_GPU_INDEX)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
 os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
@@ -44,7 +50,12 @@ os.environ["TF_NUM_INTEROP_THREADS"]="6"
 
 
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
-
+# os.environ['CUDA_CACHE_DISABLE'] = '0'
+# os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
+# os.environ['TF_ADJUST_HUE_FUSED'] = '1'
+# os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
+# os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
+# os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
 from absl import app
 
 import tensorflow as tf
@@ -52,11 +63,7 @@ if "force_gpu_compatible" in dir(tf.config):
     print("Using Custom TF. Enabling pinned memory")
     tf.config.force_gpu_compatible(True)
 from tensorflow.python.framework.ops import disable_eager_execution
-from mask_rcnn.utils.herring_env import is_herring
 
-if is_herring():
-    import herring.tensorflow as herring
-    herring.init()
 
 from mask_rcnn.utils.logging_formatter import logging
 

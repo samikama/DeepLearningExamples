@@ -28,9 +28,9 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
             import horovod.tensorflow as hvd
             hvd.init()
             
-        devices = tf.config.list_physical_devices('GPU')
-        tf.config.set_visible_devices([devices[MPI_local_rank()]], 'GPU')
-        logical_devices = tf.config.list_logical_devices('GPU')
+        # devices = tf.config.list_physical_devices('GPU')
+        # tf.config.set_visible_devices([devices[MPI_local_rank()]], 'GPU')
+        #logical_devices = tf.config.list_logical_devices('GPU')
 
     tf.config.optimizer.set_experimental_options({"auto_mixed_precision": run_config.amp})
     tf.config.optimizer.set_jit(run_config.xla)
@@ -64,10 +64,11 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
             if MPI_rank(is_herring())==0:
                 logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
             mrcnn_model.train_epoch(min(run_config.num_steps_per_eval,run_config.total_steps), broadcast=epoch==0,profile=f"{profile_path}_{epoch}" if profile_path else None)
-            if MPI_rank(is_herring())==0:
+            if MPI_rank(is_herring())==0 and eval_each_step:
                 logging.info("Running epoch {} evaluation".format(epoch+1))
-            mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval, 
-                                 use_ext=run_config.use_ext)
+            if eval_each_step:
+                mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval, 
+                                    use_ext=run_config.use_ext)
     if MPI_rank(is_herring())==0:
         logging.info("Training complete in {} seconds.".format(time.time() - start_time))
 

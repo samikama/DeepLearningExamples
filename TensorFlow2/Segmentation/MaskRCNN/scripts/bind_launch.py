@@ -98,7 +98,7 @@ def main():
 
   # variables for numactrl binding
   NSOCKETS = args.nsockets_per_node
-  NGPUS_PER_SOCKET = args.nproc_per_node // args.nsockets_per_node
+  NGPUS_PER_SOCKET = max(args.nproc_per_node // args.nsockets_per_node,1)
   NCORES_PER_GPU = args.ncores_per_socket // NGPUS_PER_SOCKET
 
   # world size in terms of number of processes
