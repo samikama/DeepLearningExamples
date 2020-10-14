@@ -242,18 +242,21 @@ class MRCNN(tf.keras.Model):
                                                 name="mask_head"
                                             )
     def call(self, features, labels, params, is_training=True):
+        if 'source_ids' not in features:
+            features['source_ids'] = -1 * tf.ones([1], dtype=tf.float32)
+        return self.__call(features['images'],features['source_ids'],features['image_info'],labels,params,is_training)
+    @tf.function(experimental_compile=False)
+    def __call(self,images,source_ids,image_info, labels, params, is_training=False):
         model_outputs = {}
         is_gpu_inference = not is_training and params['use_batched_nms']
-        batch_size, image_height, image_width, _ = features['images'].get_shape().as_list()
-        if 'source_ids' not in features:
-            features['source_ids'] = -1 * tf.ones([batch_size], dtype=tf.float32)
+        batch_size, image_height, image_width, _ = images.get_shape().as_list()
 
         all_anchors = anchors.Anchors(params['min_level'], params['max_level'],
                                       params['num_scales'], params['aspect_ratios'],
                                       params['anchor_scale'],
                                       (image_height, image_width))
         backbone_feats = self.backbone(
-            features['images'],
+            images,
             training=is_training,
         )
         fpn_feats = self.fpn(backbone_feats, training=is_training)
@@ -277,7 +280,7 @@ class MRCNN(tf.keras.Model):
                 scores_outputs=rpn_score_outputs,
                 box_outputs=rpn_box_outputs,
                 all_anchors=all_anchors,
-                image_info=features['image_info'],
+                image_info=image_info,
                 rpn_pre_nms_topn=rpn_pre_nms_topn,
                 rpn_post_nms_topn=rpn_post_nms_topn,
                 rpn_nms_threshold=rpn_nms_threshold,
@@ -288,7 +291,7 @@ class MRCNN(tf.keras.Model):
                 scores_outputs=rpn_score_outputs,
                 box_outputs=rpn_box_outputs,
                 all_anchors=all_anchors,
-                image_info=features['image_info'],
+                image_info=image_info,
                 rpn_pre_nms_topn=rpn_pre_nms_topn,
                 rpn_post_nms_topn=rpn_post_nms_topn,
                 rpn_nms_threshold=rpn_nms_threshold,
@@ -336,7 +339,7 @@ class MRCNN(tf.keras.Model):
                 class_outputs=class_outputs,
                 box_outputs=box_outputs,
                 anchor_boxes=rpn_box_rois,
-                image_info=features['image_info'],
+                image_info=image_info,
                 pre_nms_num_detections=params['test_rpn_post_nms_topn'],
                 post_nms_num_detections=params['test_detections_per_image'],
                 nms_threshold=params['test_nms'],
@@ -883,7 +886,7 @@ class TapeModel(object):
             opt = tf.keras.mixed_precision.experimental.LossScaleOptimizer(opt, 'dynamic')
         return opt, schedule
     
-    @tf.function
+    @tf.function(experimental_compile=False)
     def train_step(self, features, labels, sync_weights=False, sync_opt=False):
         loss_dict = dict()
         with tf.GradientTape() as tape:

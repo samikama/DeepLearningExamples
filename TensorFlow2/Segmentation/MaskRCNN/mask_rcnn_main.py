@@ -28,8 +28,20 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
 os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
 os.environ['TF_GPU_THREAD_COUNT'] = '1'
-#os.environ["TF_NUM_INTRAOP_THREADS"]="4"
-#os.environ["TF_NUM_INTEROP_THREADS"]="6"
+
+# intra 4 inter 6 -=>   83.18509163975877 +/- 59.894994458850825
+# 6, 6 ->  82.88641155632895 +/- 55.527550443248835 ms
+# intra 7, inter 6 -> 82.33207237081629 +/- 54.65450777384873 ms
+#8, 5  82.87076056413454 +/- 59.2222263158991
+#8, 8 84.12756974417385 +/- 57.59902890959798
+# no data xla 
+# 7, 6 -> 80.96032146381685 +/- 49.02200601964126 
+os.environ["TF_NUM_INTRAOP_THREADS"]="7"
+os.environ["TF_NUM_INTEROP_THREADS"]="6"
+
+#os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
+#os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
+
 
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
 
