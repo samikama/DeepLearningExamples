@@ -47,8 +47,8 @@ from mask_rcnn.utils import coco_utils
 from mask_rcnn.object_detection import visualization_utils
 from mask_rcnn.utils.distributed_utils import MPI_rank
 
-import dllogger
-from dllogger import Verbosity
+# import dllogger
+# from dllogger import Verbosity
 
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
@@ -288,10 +288,10 @@ def compute_coco_eval_metric_1(predictor,
             seconds=int(total_processing_seconds)
         )
     )
-    dllogger.log(step=(), data={"avg_inference_throughput": avg_throughput}, verbosity=Verbosity.DEFAULT)
+    # dllogger.log(step=(), data={"avg_inference_throughput": avg_throughput}, verbosity=Verbosity.DEFAULT)
     avg_inference_time = float(total_processing_hours * 3600 + int(total_processing_minutes) * 60 +
         int(total_processing_seconds))
-    dllogger.log(step=(), data={"avg_inference_time": avg_inference_time}, verbosity=Verbosity.DEFAULT)
+    # dllogger.log(step=(), data={"avg_inference_time": avg_inference_time}, verbosity=Verbosity.DEFAULT)
     logging.info("==================== Metrics ====================")
 
     # logging.info('Eval Epoch results: %s' % pprint.pformat(eval_results, indent=4))
@@ -318,12 +318,14 @@ def evaluate(eval_estimator,
              latest_ckpt=None,
              do_distributed=False,
              async_eval=False,
-             use_ext=False):
+             use_ext=False,
+             hooks=None):
 
     """Runs COCO evaluation once."""
     predictor = eval_estimator.predict(
         input_fn=input_fn,
         checkpoint_path=latest_ckpt,
+        hooks=hooks,
         yield_single_examples=False
     )
 
@@ -414,7 +416,7 @@ def write_summary(eval_results, summary_dir, current_step, predictions=None):
             except AttributeError:
                 tf.summary.scalar(name=metric, data=eval_results[metric], step=current_step)
                 eval_results_dict[metric] = float(eval_results[metric])
-        dllogger.log(step=(), data=eval_results_dict, verbosity=Verbosity.DEFAULT)
+        # dllogger.log(step=(), data=eval_results_dict, verbosity=Verbosity.DEFAULT)
 
         if isinstance(predictions, dict) and predictions:
             images_summary = get_image_summary(predictions, current_step)
@@ -601,21 +603,23 @@ def fast_eval(predictions, annotations_file):
                         'counts': a_prediction['segmentation']['counts'].decode()}
         box_predictions.append({'image_id': a_prediction['image_id'],
                                 'category_id': a_prediction['category_id'],
-                                'bbox': list(map(lambda x: float(round(x, 2)), a_prediction['bbox'][:4])),
+                                'bbox': list(map(lambda x: float(round(x, 2)), 
+                                                 a_prediction['bbox'][:4])),
                                 'score': float(a_prediction['score'])})
         mask_predictions.append({'image_id': a_prediction['image_id'],
                                  'category_id': a_prediction['category_id'],
                                  'score': float(a_prediction['score']),
                                  'segmentation': segmentation})
     
-    with open(bbox_file_name, 'w') as outfile:
+    '''with open(bbox_file_name, 'w') as outfile:
         json.dump(box_predictions, outfile)
     with open(mask_file_name, 'w') as outfile:
-        json.dump(mask_predictions, outfile)
+        json.dump(mask_predictions, outfile)'''
     imgIds = list(set(imgIds))
     
     cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
-    cocoDt = cocoGt.loadRes(bbox_file_name, use_ext=True)
+    # cocoDt = cocoGt.loadRes(bbox_file_name, use_ext=True)
+    cocoDt = cocoGt.loadRes(box_predictions, use_ext=True)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=True)
     cocoEval.params.imgIds  = imgIds
     cocoEval.evaluate()
@@ -623,11 +627,12 @@ def fast_eval(predictions, annotations_file):
     cocoEval.summarize()
     
     cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
-    cocoDt = cocoGt.loadRes(mask_file_name, use_ext=True)
+    # cocoDt = cocoGt.loadRes(mask_file_name, use_ext=True)
+    cocoDt = cocoGt.loadRes(mask_predictions, use_ext=True)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=True)
     cocoEval.params.imgIds  = imgIds
     cocoEval.evaluate()
     cocoEval.accumulate()
     cocoEval.summarize()
-    os.remove(bbox_file_name)
-    os.remove(mask_file_name)
+    # os.remove(bbox_file_name)
+    # os.remove(mask_file_name)

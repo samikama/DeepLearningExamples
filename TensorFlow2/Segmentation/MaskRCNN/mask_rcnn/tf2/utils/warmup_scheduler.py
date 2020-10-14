@@ -6,14 +6,15 @@ class WarmupScheduler(tf.keras.optimizers.schedules.LearningRateSchedule):
     Wraps another learning rate scheduler to add a linear or exponential warmup
     """
     
-    def __init__(self, schedule, initial_learning_rate, warmup_steps, warmup_type='linear',
-                 dtype=tf.float32):
+    def __init__(self, schedule, initial_learning_rate, warmup_steps, 
+                 warmup_type='linear', overlap=True, dtype=tf.float32):
         super(WarmupScheduler, self).__init__()
         self.schedule = schedule
         self.initial_learning_rate = tf.cast(initial_learning_rate, dtype)
         self.warmup_steps = tf.cast(warmup_steps, dtype)
         self.warmup_type = warmup_type
         self.dtype = dtype
+        self.overlap = overlap
         self.schedule_learning_rate = self.schedule(0)
         
     def compute_linear_warmup(self, step):
@@ -23,7 +24,10 @@ class WarmupScheduler(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __call__(self, step):
         global_step_recomp = tf.cast(step, self.dtype)
         if global_step_recomp>=self.warmup_steps:
-            return self.schedule(global_step_recomp)
+            if self.overlap:
+                return self.schedule(global_step_recomp)
+            else:
+                return self.schedule(global_step_recomp - self.warmup_steps)
         return self.compute_linear_warmup(global_step_recomp)
     
     def get_config(self):
@@ -31,3 +35,5 @@ class WarmupScheduler(tf.keras.optimizers.schedules.LearningRateSchedule):
         schedule_config['initial_learning_rate'] = self.initial_learning_rate
         schedule_config['warmup_steps'] = self.warmup_steps
         schedule_config['warmup_type'] = self.warmup_type
+        schedule_config['overlap'] = self.overlap
+        return schedule_config

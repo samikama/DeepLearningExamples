@@ -22,13 +22,16 @@ model architecture, loss function, learning rate schedule, and evaluation
 procedure.
 
 """
-import time
+
+import sys
 import itertools
-import copy
+import copy,os
 import numpy as np
+import time
 import multiprocessing
 from statistics import mean
 import threading
+from collections import defaultdict
 from math import ceil
 from mpi4py import MPI
 from tqdm import tqdm
@@ -36,7 +39,7 @@ import os
 
 import h5py
 import tensorflow as tf
-import tensorflow_addons as tfa
+#import tensorflow_addons as tfa
 from tensorflow.core.protobuf import rewriter_config_pb2
 from mask_rcnn import anchors
 
@@ -73,6 +76,19 @@ if is_herring():
     import herring.tensorflow as herring
 else:
     hvd = LazyImport("horovod.tensorflow")
+from tensorflow.python.profiler import profiler_v2 as tf_profiler
+from tensorflow.python.profiler.trace import Trace as prof_Trace
+try:
+    from tensorflow.python import _pywrap_nvtx as nvtx
+except ImportError:
+    class DummyNvtx:
+        def __init__(self):
+            pass
+        def push(self,a=None,b=None):
+            pass
+        def pop(self,a=None):
+            pass
+    nvtx=DummyNvtx()
 
 MODELS = dict()
 
@@ -232,18 +248,21 @@ class MRCNN(tf.keras.Model):
                                                 name="mask_head"
                                             )
     def call(self, features, labels, params, is_training=True):
+        if 'source_ids' not in features:
+            features['source_ids'] = -1 * tf.ones([1], dtype=tf.float32)
+        return self.__call(features['images'],features['source_ids'],features['image_info'],labels,params,is_training)
+    @tf.function(experimental_compile=False)
+    def __call(self,images,source_ids,image_info, labels, params, is_training=False):
         model_outputs = {}
         is_gpu_inference = not is_training and params['use_batched_nms']
-        batch_size, image_height, image_width, _ = features['images'].get_shape().as_list()
-        if 'source_ids' not in features:
-            features['source_ids'] = -1 * tf.ones([batch_size], dtype=tf.float32)
+        batch_size, image_height, image_width, _ = images.get_shape().as_list()
 
         all_anchors = anchors.Anchors(params['min_level'], params['max_level'],
                                       params['num_scales'], params['aspect_ratios'],
                                       params['anchor_scale'],
                                       (image_height, image_width))
         backbone_feats = self.backbone(
-            features['images'],
+            images,
             training=is_training,
         )
         fpn_feats = self.fpn(backbone_feats, training=is_training)
@@ -267,7 +286,7 @@ class MRCNN(tf.keras.Model):
                 scores_outputs=rpn_score_outputs,
                 box_outputs=rpn_box_outputs,
                 all_anchors=all_anchors,
-                image_info=features['image_info'],
+                image_info=image_info,
                 rpn_pre_nms_topn=rpn_pre_nms_topn,
                 rpn_post_nms_topn=rpn_post_nms_topn,
                 rpn_nms_threshold=rpn_nms_threshold,
@@ -278,7 +297,7 @@ class MRCNN(tf.keras.Model):
                 scores_outputs=rpn_score_outputs,
                 box_outputs=rpn_box_outputs,
                 all_anchors=all_anchors,
-                image_info=features['image_info'],
+                image_info=image_info,
                 rpn_pre_nms_topn=rpn_pre_nms_topn,
                 rpn_post_nms_topn=rpn_post_nms_topn,
                 rpn_nms_threshold=rpn_nms_threshold,
@@ -326,7 +345,7 @@ class MRCNN(tf.keras.Model):
                 class_outputs=class_outputs,
                 box_outputs=box_outputs,
                 anchor_boxes=rpn_box_rois,
-                image_info=features['image_info'],
+                image_info=image_info,
                 pre_nms_num_detections=params['test_rpn_post_nms_topn'],
                 post_nms_num_detections=params['test_detections_per_image'],
                 nms_threshold=params['test_nms'],
@@ -814,11 +833,11 @@ class SessionModel(object):
         else:
             config.gpu_options.force_gpu_compatible = True
             if MPI_is_distributed():
-                config.gpu_options.visible_device_list = str(MPI_local_rank())
+                config.gpu_options.visible_device_list = ",".join([str(x) for x in range(len(os.environ.get("CUDA_VISIBLE_DEVICES","0").split(",")))])
         if use_xla:
             logging.info("XLA is activated - Experiment Feature")
             config.graph_options.optimizer_options.global_jit_level = tf.compat.v1.OptimizerOptions.ON_1
-        config.intra_op_parallelism_threads = 1  # Avoid pool of Eigen threads
+        config.intra_op_parallelism_threads = 2  # Avoid pool of Eigen threads
         if MPI_is_distributed():
             config.inter_op_parallelism_threads = max(2, multiprocessing.cpu_count() // hvd.local_size())
         elif not use_tf_distributed:
@@ -834,6 +853,7 @@ class TapeModel(object):
         self.forward = MRCNN(self.params.values(), is_training=is_training)
         self.model_dir = self.params.model_dir
         train_params = dict(self.params.values(), batch_size=self.params.train_batch_size)
+        print("SAMI SAMI ",train_input_fn)
         self.train_tdf = iter(train_input_fn(train_params)) \
                             if train_input_fn else None
         eval_params = dict(self.params.values(), batch_size=self.params.eval_batch_size)
@@ -858,8 +878,7 @@ class TapeModel(object):
                                                          alpha=0.001)
         else:
             raise NotImplementedError
-        schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
-                                                    self.params.warmup_steps)
+        
         if self.params.optimizer_type=="SGD":
             opt = tf.keras.optimizers.SGD(learning_rate=schedule, 
                                           momentum=self.params.momentum)
@@ -876,9 +895,8 @@ class TapeModel(object):
         if self.params.amp:
             opt = tf.keras.mixed_precision.experimental.LossScaleOptimizer(opt, 'dynamic')
         return opt, schedule
-
-
-    @tf.function
+    
+    @tf.function(experimental_compile=False)
     def train_step(self, features, labels, sync_weights=False, sync_opt=False):
         loss_dict = dict()
         with tf.GradientTape() as tape:
@@ -975,48 +993,81 @@ class TapeModel(object):
         return loss_dict
     
     def initialize_model(self):
+        if MPI_rank()==0:
+            logging.info("Initializing model")
         features, labels = next(self.train_tdf)
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
+        b_w = tf.convert_to_tensor(True)
+        b_o = tf.convert_to_tensor(True)
+        loss_dict = self.train_step(features, labels, b_w, b_o)
+        prediction = self.predict(features)
     
-    def train_epoch(self, steps, broadcast=False):
+    def train_epoch(self, steps, broadcast=False,profile=None):
         if MPI_rank(is_herring())==0:
             logging.info("Starting training loop")
-            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+            p_bar = tqdm(range(steps), file=sys.stdout, 
+                         bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             loss_history = []
         else:
             p_bar = range(steps)
+        times=[]
 
-        timings=[]
-        for i in p_bar:
-            if broadcast and i==0:
-                b_w, b_o = True, True
-            elif i==0:
-                b_w, b_o = False, True
-            else:
-                b_w, b_o = False, False
-            
-            tstart = time.perf_counter()
-            features, labels = next(self.train_tdf)
-            loss_dict = self.train_step(features, labels, b_w, b_o)
+        if MPI_rank(is_herring())==0 and profile is not None:
+            logging.info(f"Saving profile to {profile}")
+            tf_profiler.start(profile)
+            for i in p_bar:
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                with prof_Trace(f"Step-",step_num=i,_r=1):
+                    tstart=time.perf_counter()
+                    features, labels = next(self.train_tdf)
+                    loss_dict = self.train_step(features, labels, b_w, b_o)
+                    times.append(time.perf_counter()-tstart)
+                if MPI_rank()==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
+            tf_profiler.stop()
+        else:
+            runtype="TrainStep"
+            for i in p_bar:
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                tstart=time.perf_counter()
+                step_token=nvtx.push(f"{runtype}-{i}",runtype)
+                features, labels = next(self.train_tdf)
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                loss_dict = self.train_step(features, labels, b_w, b_o)
+                times.append(time.perf_counter()-tstart)
+                nvtx.pop(step_token)
+                if MPI_rank(is_herring())==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
 
-            delta_t = time.perf_counter() - tstart
-            timings.append(delta_t)
-            if MPI_rank(is_herring())==0:
-                loss_history.append(loss_dict['total_loss'].numpy())
-                step = self.optimizer.iterations
-                learning_rate = self.schedule(step)
-                p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
-                                                                          learning_rate))
-            #if i%500 == 0:
-            #    timings = np.asarray(timings, np.float)
-            #    print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
-            #    timings = []
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[1:])*1000.} +/- {np.std(times[1:])*1000.} ms")
         if MPI_rank(is_herring()) == 0:
             print("Saving checkpoint...")
             self.epoch_num+=1
             self.save_model()
-            
+
     def get_latest_checkpoint(self):
         try:
             return sorted([_ for _ in os.listdir(self.model_dir) if _.endswith(".h5")])[-1]
@@ -1037,7 +1088,6 @@ class TapeModel(object):
         for i in range(len(file.keys())):
             weights.append(file['weight'+str(i)][:])
         self.forward.set_weights(weights)
-    
 
     @tf.function            
     def predict(self, features):
@@ -1052,7 +1102,8 @@ class TapeModel(object):
     def run_eval(self, steps, async_eval=False, use_ext=False):
         if MPI_rank(is_herring())==0:
             logging.info("Starting eval loop")
-            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+            p_bar = tqdm(range(steps), file=sys.stdout, 
+                         bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         else:
             p_bar = range(steps)
         worker_predictions = dict()
@@ -1071,11 +1122,16 @@ class TapeModel(object):
             _preds[k] = np.concatenate(v, axis=0)
         if MPI_rank(is_herring()) < 32:
             converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+            # converted_predictions = coco.load_predictions2(_preds, include_mask=True, is_image_mask=False)
             worker_source_ids = _preds['source_id']
+            # worker_source_ids = list(converted_predictions.keys())
         else:
-            converted_predictions = []
+            #converted_predictions = defaultdict(list)
+            converted_predictions =[]
             worker_source_ids = []
         MPI.COMM_WORLD.barrier()
+        if MPI_rank() == 0:
+            logging.info("Gathering logs")
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
         source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
@@ -1083,11 +1139,19 @@ class TapeModel(object):
             all_predictions = []
             source_ids = []
             for i, p in enumerate(predictions_list):
-                if i < 32:
-                    all_predictions.extend(p)
+                all_predictions.extend(p)
             for i, s in enumerate(source_ids_list):
-                if i < 32:
-                    source_ids.extend(s)
+                source_ids.extend(s)
+            '''all_predictions = []
+            source_ids = []
+            logging.info("Assembling results")
+            for i, p in enumerate(predictions_list):
+                for a_key, a_value in p.items():
+                    if a_key not in source_ids:
+                        source_ids.append(a_key)
+                        all_predictions.extend(a_value)'''
+            logging.info("{} images in detection results".format(len(source_ids)))
+            logging.info("{} unique images in detection results".format(len(set(source_ids))))
             if use_ext:
                 args = [all_predictions, validation_json_file]
                 if async_eval:

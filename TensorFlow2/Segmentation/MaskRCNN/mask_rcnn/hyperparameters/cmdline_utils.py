@@ -160,6 +160,8 @@ def define_hparams_flags():
     flags.DEFINE_string('optimizer_type', default='SGD', help='Optimizer to use - SGD or LAMB')
     
     flags.DEFINE_string('lr_schedule', default='piecewise', help='Learning rate schedule - piecewise or cosine')
+    
+    flags.DEFINE_float("alpha", default=0.001, help='cosine decay end point')
 
     flags.DEFINE_string(
         'model_dir',
@@ -211,6 +213,18 @@ def define_hparams_flags():
         'use_batched_nms',
         default=False,
         help='Enable Batched NMS at inference.'
+    )
+
+    flags.DEFINE_string(
+        'profile_path',
+        default=None,
+        help='path for the profile output'
+    )
+
+    flags.DEFINE_bool(
+        'use_default_roi_align',
+        default=True,
+        help='Use default ROIAlign implementation.'
     )
 
     flags.DEFINE_bool(

@@ -18,6 +18,7 @@
 r"""Convert raw COCO dataset to TFRecord for object_detection.
 
 Example usage:
+
     python create_coco_tf_record.py --logtostderr \
       --train_image_dir="${TRAIN_IMAGE_DIR}" \
       --val_image_dir="${VAL_IMAGE_DIR}" \

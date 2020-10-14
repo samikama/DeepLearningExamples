@@ -38,23 +38,37 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn)
     mrcnn_model.initialize_model()
     eval_workers = min(MPI_size(is_herring()), 32)
+    start_time = time.time()
+    eval_each_step=False
+    if run_config.mode.lower() == "train_and_eval":
+        eval_each_step=True
+    profile_path=None
+    if run_config.profile_path:
+        profile_path=run_config.profile_path
+    logging.info("SAMI SAMI SAMI Profile path is {}".format(profile_path))
     
     if run_config.offload_eval:
         for epoch in range(run_config.first_eval, total_epochs):
             if MPI_rank(is_herring())==0:
                 logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+                mpi_size = MPI_size()
+                logging.info("Number of GPUs {}".format(mpi_size))
+            mrcnn_model.train_epoch(min(run_config.num_steps_per_eval,run_config.total_steps), broadcast=epoch==0,profile=f"{profile_path}_{epoch}" if profile_path else None)
     
     else:
         for epoch in range(run_config.first_eval):
             if MPI_rank(is_herring())==0:
                 logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+            mrcnn_model.train_epoch(min(run_config.num_steps_per_eval,run_config.total_steps), broadcast=epoch==0,profile=f"{profile_path}_{epoch}" if profile_path else None)
         for epoch in range(run_config.first_eval, total_epochs):
             if MPI_rank(is_herring())==0:
                 logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+            mrcnn_model.train_epoch(min(run_config.num_steps_per_eval,run_config.total_steps), broadcast=epoch==0,profile=f"{profile_path}_{epoch}" if profile_path else None)
             if MPI_rank(is_herring())==0:
                 logging.info("Running epoch {} evaluation".format(epoch+1))
             mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval, 
                                  use_ext=run_config.use_ext)
+    if MPI_rank(is_herring())==0:
+        logging.info("Training complete in {} seconds.".format(time.time() - start_time))
+
+

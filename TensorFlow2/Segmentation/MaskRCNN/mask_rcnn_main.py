@@ -22,16 +22,35 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-
-import subprocess
-
+from mpi4py import MPI
+os.environ["CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES",str(MPI.COMM_WORLD.Get_rank()%8))
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
+os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
+os.environ['TF_GPU_THREAD_COUNT'] = '1'
+
+# intra 4 inter 6 -=>   83.18509163975877 +/- 59.894994458850825
+# 6, 6 ->  82.88641155632895 +/- 55.527550443248835 ms
+# intra 7, inter 6 -> 82.33207237081629 +/- 54.65450777384873 ms
+#8, 5  82.87076056413454 +/- 59.2222263158991
+#8, 8 84.12756974417385 +/- 57.59902890959798
+# no data xla 
+# 7, 6 -> 80.96032146381685 +/- 49.02200601964126 
+os.environ["TF_NUM_INTRAOP_THREADS"]="7"
+os.environ["TF_NUM_INTEROP_THREADS"]="6"
+
+#os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=fusible"
+#os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=1"
+
+
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
 
 from absl import app
 
 import tensorflow as tf
+if "force_gpu_compatible" in dir(tf.config):
+    print("Using Custom TF. Enabling pinned memory")
+    tf.config.force_gpu_compatible(True)
 from tensorflow.python.framework.ops import disable_eager_execution
 from mask_rcnn.utils.herring_env import is_herring
 
@@ -54,14 +73,16 @@ from mask_rcnn.hyperparameters import params_io
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
 
 from mask_rcnn.utils.logging_formatter import log_cleaning
-import dllogger
+
 
 FLAGS = define_hparams_flags()
 
 from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
+    from mask_rcnn import distributed_executer
     mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1
+    
     if runtime_config.use_tf_distributed:
         executer = distributed_executer.TFDistributedExecuter(runtime_config, mask_rcnn_model.mask_rcnn_model_fn)
     else:
@@ -84,9 +105,11 @@ def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
         raise ValueError('Mode must be one of `train`, `eval`, or `train_and_eval`')
         
 def run_session(runtime_config, train_input_fn, eval_input_fn):
+    from mask_rcnn import session_executor
     session_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
 
 def run_tape(runtime_config, train_input_fn, eval_input_fn):
+    from mask_rcnn import tape_executor
     tape_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
 
 def main(argv):
@@ -96,7 +119,7 @@ def main(argv):
     RUN_CONFIG = mask_rcnn_params.default_config()
 
     temp_config = FLAGS.flag_values_dict()
-    for i,j in temp_config.items():
+    for i,j in sorted(temp_config.items(),key=lambda x:x[0]):
         print("{}: {}".format(i,j))
     temp_config['learning_rate_decay_levels'] = [float(decay) for decay in temp_config['learning_rate_decay_levels']]
     temp_config['learning_rate_levels'] = [
@@ -132,8 +155,6 @@ def main(argv):
         if not RUN_CONFIG.include_groundtruth_in_features and not os.path.isfile(RUN_CONFIG.val_json_file):
             raise FileNotFoundError("Validation JSON File not found: %s" % RUN_CONFIG.val_json_file)
 
-    dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
-                                                           filename=RUN_CONFIG.log_path)])
 
     if RUN_CONFIG.mode in ('train', 'train_and_eval'):
         
@@ -154,7 +175,7 @@ def main(argv):
     else:
         train_input_fn = None
 
-    if RUN_CONFIG.mode in ('eval', 'train_and_eval' or (RUN_CONFIG.mode == 'train' and RUN_CONFIG.eval_after_training)):
+    if RUN_CONFIG.mode in ('eval', 'train_and_eval') or (RUN_CONFIG.mode == 'train' and RUN_CONFIG.eval_after_training):
 
         eval_input_fn = dataloader.InputReader(
             file_pattern=RUN_CONFIG.validation_file_pattern,
