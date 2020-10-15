@@ -54,7 +54,6 @@ from mask_rcnn.ops import training_ops
 
 from mask_rcnn.utils.logging_formatter import logging
 
-from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_local_rank, MPI_rank
 from mask_rcnn import evaluation, coco_metric
 
 from mask_rcnn.utils.meters import StandardMeter
@@ -71,8 +70,10 @@ from mask_rcnn.utils.herring_env import is_herring
 
 if is_herring():
     import herring.tensorflow as herring
+    from mask_rcnn.utils.distributed_utils_herring import MPI_is_distributed, MPI_local_rank, MPI_rank
 else:
     hvd = LazyImport("horovod.tensorflow")
+    from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_local_rank, MPI_rank
 
 MODELS = dict()
 
@@ -965,7 +966,7 @@ class TapeModel(object):
                     logging.info("Broadcasting optimizer")
                 herring.broadcast_variables(self.optimizer.variables(), 0)        
         else:
-            if MPI_is_distributed():
+            if MPI_is_distributed(False):
                 tape = hvd.DistributedGradientTape(tape, compression=hvd.compression.NoneCompressor)
             if self.params.amp:
                 scaled_gradients = tape.gradient(scaled_loss, self.forward.trainable_variables)
@@ -990,12 +991,12 @@ class TapeModel(object):
             # self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
             self.optimizer.apply_gradients(grads_and_vars)
 
-            if MPI_is_distributed() and sync_weights:
-                if MPI_rank()==0:
+            if MPI_is_distributed(False) and sync_weights:
+                if MPI_rank(False)==0:
                     logging.info("Broadcasting variables")
                 hvd.broadcast_variables(self.forward.variables, 0)
-            if MPI_is_distributed() and sync_opt:
-                if MPI_rank()==0:
+            if MPI_is_distributed(False) and sync_opt:
+                if MPI_rank(False)==0:
                     logging.info("Broadcasting optimizer")
                 hvd.broadcast_variables(self.optimizer.variables(), 0)
         return loss_dict
