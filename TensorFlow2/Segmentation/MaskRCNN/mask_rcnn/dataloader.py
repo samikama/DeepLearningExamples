@@ -27,7 +27,7 @@ import multiprocessing
 import glob
 from mpi4py import MPI
 import tensorflow as tf
-
+from mask_rcnn.utils.herring_env import is_herring
 from mask_rcnn.utils.logging_formatter import logging
 
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
@@ -188,7 +188,8 @@ class InputReader(object):
       if self._mode != tf.estimator.ModeKeys.TRAIN:
         dataset = dataset.take(int(5000 / batch_size))
 
-    dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE,)
+    #dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE,)
+    dataset = dataset.prefetch(buffer_size=1000)
     '''if self._mode == tf.estimator.ModeKeys.PREDICT or n_gpus > 1:
             if not tf.distribute.has_strategy():
                 dataset = dataset.apply(
@@ -238,7 +239,10 @@ class InputReader(object):
       # data_options.experimental_stats.latency_all_edges = True
 
       dataset = dataset.with_options(data_options)
-
+      # prefetch_count=params["warmup_steps"]+params["benchmark_steps"]
+      # print("SAMI prefetching",prefetch_count)
+      # dataset.prefetch(1000)
+      # dataset.cache()
     return dataset
 
 
@@ -305,14 +309,13 @@ if __name__ == "__main__":
 
   import numpy as np
 
-  os.environ["CUDA_VISIBLE_DEVICES"] = os.environ[
-      "CUDA_VISIBLE_DEVICES"] = os.environ.get(
+  os.environ["CUDA_VISIBLE_DEVICES"]=os.environ.get(
           "CUDA_VISIBLE_DEVICES", str(MPI.COMM_WORLD.Get_rank() % 8))
   #os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
   os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
   os.environ['TF_GPU_THREAD_COUNT'] = '1'
-  os.environ["TF_NUM_INTRAOP_THREADS"]="4"
-  os.environ["TF_NUM_INTEROP_THREADS"]="10"
+  os.environ["TF_NUM_INTRAOP_THREADS"]=os.environ.get("TF_NUM_INTRAOP_THREADS","7")
+  os.environ["TF_NUM_INTEROP_THREADS"]=os.environ.get("TF_NUM_INTEROP_THREADS","6")
 
   logging.set_verbosity(logging.INFO)
 
@@ -455,6 +458,8 @@ if __name__ == "__main__":
       "disable_options": False
   }
   ds_params["image_size"] = [832, 1344]
+  ds_params["warmup_steps"]=FLAGS.warmup_steps
+  ds_params["benchmark_steps"]=FLAGS.benchmark_steps
 
   dataset = input_dataset(params=ds_params)
 
@@ -571,9 +576,10 @@ if __name__ == "__main__":
       if (step + 1) > BURNIN_STEPS:
         processing_time_arr.append(elapsed_time * 1000.)  # in msec
         img_per_sec_arr.append(imgs_per_sec)
+        iminf=features["image_info"].numpy()[0].astype(np.float)
         individual_processing_timing_data.append(
             (elapsed_time * 1000, float(features["source_ids"].numpy()),
-             features["image_info"].numpy()))
+             iminf[0],iminf[1],iminf[2],iminf[3],iminf[4]))
       else:
         warmup_timings.append(elapsed_time * 1000)
         warmup_fps.append(imgs_per_sec)
@@ -592,14 +598,14 @@ if __name__ == "__main__":
               (step + 1, FLAGS.batch_size, np.mean(warmup_timings[-log_step:]),
                np.std(warmup_timings[-log_step:]),
                np.mean(warmup_fps[-log_step:]),
-               np.mean(warmup_fps[-log_step:])))
+               np.std(warmup_fps[-log_step:])))
 
     processing_time = time.perf_counter() - processing_start_time
     avg_processing_speed = np.mean(img_per_sec_arr)
 
     individual_timings = np.array(individual_processing_timing_data)
     if FLAGS.save_steps:
-      np.savez("DataPipelineIndividualTimings.npz", timings=individual_timings)
+      np.savez("DataPipelineIndividualTimingsFast1ms%02d.npz"%MPI_rank(is_herring()), timings=individual_timings)
     print(
         "\n###################################################################")
     print("*** Data Loading Performance Metrics ***\n")

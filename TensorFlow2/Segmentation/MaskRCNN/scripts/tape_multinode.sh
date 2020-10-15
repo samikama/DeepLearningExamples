@@ -62,7 +62,7 @@ mkdir -p $BASEDIR/../results_tape_1x
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-	--training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
+        --training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
         --validation_file_pattern="/shared/data/nv_tfrecords/val*.tfrecord" \
         --val_json_file="/shared/data/nv_tfrecords/annotations/instances_val2017.json" \
         --amp \

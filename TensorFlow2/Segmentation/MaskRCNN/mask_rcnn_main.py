@@ -30,6 +30,7 @@ if is_herring():
     herring.init()
     CURR_GPU_INDEX=str(herring.local_rank())
 os.environ["CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES",CURR_GPU_INDEX)
+print("Using CUDA_VISIBLE_DEVICES=",os.environ.get("CUDA_VISIBLE_DEVICES",CURR_GPU_INDEX))
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
 os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'

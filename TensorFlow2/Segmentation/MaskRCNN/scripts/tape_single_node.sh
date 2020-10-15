@@ -19,7 +19,7 @@ GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 NUM_GPUS=${NUM_GPUS:-${GPU_COUNT}}
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
-STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
+STEP_PER_EPOCH=${STEPS_PER_EPOCH:-$(( IMAGES / GLOBAL_BATCH_SIZE ))}
 FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
 SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
 TOTAL_STEPS=${TOTAL_STEPS:-$(( 13 * STEP_PER_EPOCH ))}
@@ -27,7 +27,7 @@ DATA_PATH=${DATA_PATH:-"/data/coco/coco-2017"}
 LR_MULTIPLIER=0.001
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
-
+WITH_XLA=${WITH_XLA:-1}
 #source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -65,12 +65,12 @@ mkdir -p $BASEDIR/../baseline_1x_tape
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern="${DATA_PATH}/nv_coco/train*.tfrecord" \
+        --training_file_pattern="${DATA_PATH}/fast_coco/train*.tfrecord" \
         --validation_file_pattern="${DATA_PATH}/nv_coco/val*.tfrecord" \
         --val_json_file="${DATA_PATH}/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
-        --xla \
+        --xla=${WITH_XLA} \
         --tf2 \
         --async_eval \
         --use_ext \
