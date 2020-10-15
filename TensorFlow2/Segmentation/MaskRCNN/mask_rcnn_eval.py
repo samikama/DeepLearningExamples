@@ -22,6 +22,7 @@ from __future__ import division
 from __future__ import print_function
 from collections import deque
 import os
+import cProfile, pstats
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
@@ -95,7 +96,7 @@ def get_latest_checkpoint(q, checkpoint_dir, model):
 def do_eval(run_config, train_input_fn, eval_input_fn):
 
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn, is_training=True)
-    mrcnn_model.initialize_model()
+    mrcnn_model.initialize_eval_model()
 
     q = deque()
     out_path = run_config.model_dir
@@ -114,8 +115,8 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
             q.popleft()
             print("#"*20, "Running eval for", last)
             mrcnn_model.load_model(os.path.join(run_config.model_dir,last))
-            mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval,
-                     use_ext=run_config.use_ext)
+            mrcnn_model.run_eval(run_config.eval_samples//eval_workers//run_config.eval_batch_size, async_eval=run_config.async_eval,
+                    use_ext=run_config.use_ext)
         time.sleep(5)
 
 def main(argv):

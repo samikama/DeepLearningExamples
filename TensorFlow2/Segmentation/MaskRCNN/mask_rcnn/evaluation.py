@@ -70,7 +70,19 @@ def process_prediction_for_eval(prediction):
             y1, x1, y2, x2 = box_coordinates[image_id, box_id, :]
             new_box = scale * np.array([x1, y1, x2 - x1, y2 - y1])
             processed_box_coordinates[image_id, box_id, :] = new_box
+    prediction['detection_boxes'] = processed_box_coordinates
+    return prediction
 
+def process_prediction_for_eval_batch(prediction):
+    image_info = prediction['image_info']
+    box_coordinates = prediction['detection_boxes']
+    processed_box_coordinates = np.zeros_like(box_coordinates)
+
+    for image_id in range(box_coordinates.shape[0]):
+        scale = image_info[image_id][2]
+        processed_box_coordinates[image_id, :] = np.concatenate((box_coordinates[image_id, :, 1][..., np.newaxis], box_coordinates[image_id, :, 0][..., np.newaxis], 
+                        box_coordinates[image_id, :, 3][..., np.newaxis] - box_coordinates[image_id, :, 1][..., np.newaxis], 
+                        box_coordinates[image_id, :, 2][..., np.newaxis] - box_coordinates[image_id, :, 0][..., np.newaxis]), axis=1) * scale
     prediction['detection_boxes'] = processed_box_coordinates
     return prediction
 

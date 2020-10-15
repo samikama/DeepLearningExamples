@@ -1014,6 +1014,11 @@ class TapeModel(object):
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
     
+    def initialize_eval_model(self):
+        features = next(self.eval_tdf)['features']
+        for _ in range(5):
+          _ = self.predict(features)
+          
     def train_epoch(self, steps, broadcast=False, profile=None):
         if MPI_rank(is_herring())==0:
             logging.info("Starting training loop")
@@ -1114,29 +1119,40 @@ class TapeModel(object):
         else:
             p_bar = range(steps)
         worker_predictions = dict()
+
+        start_total_infer = time.time()        
         for i in p_bar:
+            start = time.time()
             features = next(self.eval_tdf)['features']
+            data_load_time = time.time()
             out = self.predict(features)
-            out = evaluation.process_prediction_for_eval(out)
+            predict_time = time.time()
+            out = evaluation.process_prediction_for_eval_batch(out)
+            process_time = time.time()
             for k, v in out.items():
                 if k not in worker_predictions:
                     worker_predictions[k] = [v]
                 else:
                     worker_predictions[k].append(v)
+            append_time = time.time()
+            print(f"DataLoad {data_load_time-start} predict {predict_time - data_load_time} process {process_time - predict_time} append {append_time-process_time}")
+        end_total_infer = time.time()
         coco = coco_metric.MaskCOCO()
         _preds = copy.deepcopy(worker_predictions)
         for k, v in _preds.items():
             _preds[k] = np.concatenate(v, axis=0)
         if MPI_rank(is_herring()) < 32:
-            converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+            converted_predictions = coco.load_predictions_mp(_preds, include_mask=True, is_image_mask=False)
             worker_source_ids = _preds['source_id']
         else:
             converted_predictions = []
             worker_source_ids = []
+        end_coco_load = time.time()
         MPI.COMM_WORLD.barrier()
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
         source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
+        end_gather_result = time.time()
         if MPI_rank(is_herring()) == 0:
             all_predictions = []
             source_ids = []
@@ -1162,3 +1178,5 @@ class TapeModel(object):
                     eval_thread.start()
                 else:
                     evaluation.compute_coco_eval_metric_n(*args)
+        end_coco_eval = time.time()
+        print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} coco Load {end_coco_load - end_total_infer} gather res {end_gather_result - end_coco_load} coco_eval {end_coco_eval - end_gather_result}")
