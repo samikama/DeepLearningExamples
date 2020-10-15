@@ -1119,23 +1119,29 @@ class TapeModel(object):
         else:
             p_bar = range(steps)
         worker_predictions = dict()
-
+        data_load_total = 0
+        predict_total = 0
+        process_total = 0
+        append_total = 0
         start_total_infer = time.time()        
         for i in p_bar:
             start = time.time()
             features = next(self.eval_tdf)['features']
             data_load_time = time.time()
+            data_load_total += data_load_time-start
             out = self.predict(features)
             predict_time = time.time()
+            predict_total += predict_time - data_load_time
             out = evaluation.process_prediction_for_eval_batch(out)
             process_time = time.time()
+            process_total += process_time - predict_time
             for k, v in out.items():
                 if k not in worker_predictions:
                     worker_predictions[k] = [v]
                 else:
                     worker_predictions[k].append(v)
             append_time = time.time()
-            print(f"DataLoad {data_load_time-start} predict {predict_time - data_load_time} process {process_time - predict_time} append {append_time-process_time}")
+            append_total += append_time-process_time
         end_total_infer = time.time()
         coco = coco_metric.MaskCOCO()
         _preds = copy.deepcopy(worker_predictions)
@@ -1153,30 +1159,35 @@ class TapeModel(object):
         source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
         end_gather_result = time.time()
-        if MPI_rank(is_herring()) == 0:
-            all_predictions = []
-            source_ids = []
-            for i, p in enumerate(predictions_list):
-                if i < 32:
-                    all_predictions.extend(p)
-            for i, s in enumerate(source_ids_list):
-                if i < 32:
-                    source_ids.extend(s)
-            if use_ext:
-                args = [all_predictions, validation_json_file]
-                if async_eval:
-                    eval_thread = threading.Thread(target=evaluation.fast_eval,
-                                                   name="eval-thread", args=args)
-                    eval_thread.start()
-                else:
-                    evaluation.fast_eval(*args)
-            else:
-                args = [all_predictions, source_ids, True, validation_json_file]
-                if async_eval:
-                    eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
-                                                   name="eval-thread", args=args)
-                    eval_thread.start()
-                else:
-                    evaluation.compute_coco_eval_metric_n(*args)
+        import cProfile, pstats
+        with cProfile.Profile() as pr:
+          if MPI_rank(is_herring()) == 0:
+              all_predictions = []
+              source_ids = []
+              for i, p in enumerate(predictions_list):
+                  if i < 32:
+                      all_predictions.extend(p)
+              for i, s in enumerate(source_ids_list):
+                  if i < 32:
+                      source_ids.extend(s)
+              if use_ext:
+                  args = [all_predictions, validation_json_file]
+                  if async_eval:
+                      eval_thread = threading.Thread(target=evaluation.fast_eval,
+                                                    name="eval-thread", args=args)
+                      eval_thread.start()
+                  else:
+                      evaluation.fast_eval(*args)
+              else:
+                  args = [all_predictions, source_ids, True, validation_json_file]
+                  if async_eval:
+                      eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
+                                                    name="eval-thread", args=args)
+                      eval_thread.start()
+                  else:
+                      evaluation.compute_coco_eval_metric_n(*args)
+          ps = pstats.Stats(pr).sort_stats('cumtime')
+          ps.print_stats()
         end_coco_eval = time.time()
+        print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total}) process ({process_total/steps}, {process_total}) append ({append_total/steps},{append_total})")
         print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} coco Load {end_coco_load - end_total_infer} gather res {end_gather_result - end_coco_load} coco_eval {end_coco_eval - end_gather_result}")

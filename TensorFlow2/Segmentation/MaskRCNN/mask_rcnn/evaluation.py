@@ -56,6 +56,8 @@ from pycocotools.cocoeval import COCOeval
 
 def process_prediction_for_eval(prediction):
     """Process the model prediction for COCO eval."""
+    print("Still running the normal Eval")
+    exit(1)
     image_info = prediction['image_info']
     box_coordinates = prediction['detection_boxes']
     processed_box_coordinates = np.zeros_like(box_coordinates)
@@ -74,6 +76,7 @@ def process_prediction_for_eval(prediction):
     return prediction
 
 def process_prediction_for_eval_batch(prediction):
+
     image_info = prediction['image_info']
     box_coordinates = prediction['detection_boxes']
     processed_box_coordinates = np.zeros_like(box_coordinates)
@@ -628,7 +631,7 @@ def fast_eval(predictions, annotations_file):
     
     cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
     cocoDt = cocoGt.loadRes(bbox_file_name, use_ext=True)
-    cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=True)
+    cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=True, num_threads=32)
     cocoEval.params.imgIds  = imgIds
     cocoEval.evaluate()
     cocoEval.accumulate()
@@ -636,7 +639,7 @@ def fast_eval(predictions, annotations_file):
     
     cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
     cocoDt = cocoGt.loadRes(mask_file_name, use_ext=True)
-    cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=True)
+    cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=True, num_threads=32)
     cocoEval.params.imgIds  = imgIds
     cocoEval.evaluate()
     cocoEval.accumulate()

@@ -189,7 +189,7 @@ class MaskCOCO(COCO):
     """
     predictions = []
     total_len = len(detection_results['source_id'])
-    num_workers = 4
+    num_workers = 2
     ranges = []
     for x in range(0,total_len, total_len//num_workers):
       tmp = [x, x+total_len//num_workers] if x+total_len//num_workers < total_len else [x, total_len]
