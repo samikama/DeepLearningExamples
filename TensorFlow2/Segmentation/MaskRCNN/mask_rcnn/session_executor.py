@@ -34,7 +34,6 @@ os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
 
 devices = tf.config.list_physical_devices('GPU')
-print(MPI_local_rank(), os.environ, flush=True)
 tf.config.set_visible_devices([devices[MPI_local_rank()]], 'GPU')
 logical_devices = tf.config.list_logical_devices('GPU')
 
