@@ -261,6 +261,8 @@ class MaskCOCO(COCO):
             'score': detection_results['detection_scores'][i][box_index],
             'category_id': int(
                 detection_results['detection_classes'][i][box_index]),
+            'image_height': int(detection_results['image_info'][i][3]),
+            'image_width': int(detection_results['image_info'][i][4])
         }
 
         if include_mask:
@@ -395,6 +397,8 @@ def load_predictions_parallel(index_range, include_mask, is_image_mask, detectio
           'score': detection_results['detection_scores'][i][box_index],
           'category_id': int(
               detection_results['detection_classes'][i][box_index]),
+          'image_height': int(detection_results['image_info'][i][3]),
+          'image_width': int(detection_results['image_info'][i][4])
       }
 
       if include_mask:

@@ -1156,7 +1156,7 @@ class TapeModel(object):
         end_coco_load = time.time()
         MPI.COMM_WORLD.barrier()
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
-        source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
+        #source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
         validation_json_file=self.params.val_json_file
         end_gather_result = time.time()
         import cProfile, pstats
@@ -1167,9 +1167,9 @@ class TapeModel(object):
             for i, p in enumerate(predictions_list):
                 if i < 32:
                     all_predictions.extend(p)
-            for i, s in enumerate(source_ids_list):
-                if i < 32:
-                    source_ids.extend(s)
+            #for i, s in enumerate(source_ids_list):
+            #    if i < 32:
+            #        source_ids.extend(s)
             if use_ext:
                 args = [all_predictions, validation_json_file]
                 if async_eval:
