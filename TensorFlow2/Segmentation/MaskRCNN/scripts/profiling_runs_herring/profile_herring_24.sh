@@ -13,14 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
+DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
+WITH_XLA=${WITH_XLA:-1}
+BATCH_SIZE=1
+HOST_COUNT=1
+NUM_GPUS=8
+
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tf2_64x_novo_$1
 mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
  
 
-/shared/rejin/conda/bin/herringrun -n 8 -c /shared/rejin/conda \
+/shared/sami/conda/bin/herringrun_profile -n 8 -c /shared/sami/conda \
     RUN_HERRING=1 \
-    /shared/rejin/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+    /shared/rejin/conda/bin/python  ${BASEDIR}/bind_launch.py  --direct_launch=${DIRECT_LAUNCH} --nproc_per_node=${NUM_GPUS} --nsockets_per_node=2 --ncores_per_socket=24 ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
 	--loop_mode="tape" \
 	--box_loss_type="giou" \

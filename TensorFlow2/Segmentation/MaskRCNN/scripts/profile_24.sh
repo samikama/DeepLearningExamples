@@ -13,14 +13,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
+WITH_XLA=${WITH_XLA:-1}
+BATCH_SIZE=1
+HOST_COUNT=1
+NUM_GPUS=8
+
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tf2_64x_novo_$1
 mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
  
-
-/shared/rejin/conda/bin/herringrun -n 8 -c /shared/rejin/conda \
-    RUN_HERRING=1 \
-    /shared/rejin/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+rm -rf $BASEDIR/../baseline_1x_tape
+mkdir -p $BASEDIR/../baseline_1x_tape
+/opt/amazon/openmpi/bin/mpirun --tag-output --mca plm_rsh_no_tree_spawn 1 \
+    --mca btl_tcp_if_exclude lo,docker0 \
+    --hostfile /shared/rejin/host_2/hosts_32x \
+    -x NCCL_DEBUG=VERSION \
+    -x LD_LIBRARY_PATH \
+    -x PATH \
+    -N 8 \
+    --oversubscribe \
+    --bind-to none \
+    bash launcher_24.sh \
+    /shared/sami/conda/bin/python  ${BASEDIR}/bind_launch.py  --direct_launch=${DIRECT_LAUNCH} --nproc_per_node=${NUM_GPUS} --nsockets_per_node=2 --ncores_per_socket=24 ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
 	--loop_mode="tape" \
 	--box_loss_type="giou" \
@@ -36,8 +51,8 @@ mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
 	--beta1=0.9 \
 	--beta2=0.25 \
 	--warmup_steps=1000 \
-        --total_steps=1000 \
-        --l2_weight_decay=1.25e-3 \
+        --total_steps=4000 \
+       --l2_weight_decay=1.25e-3 \
 	--label_smoothing=0.1 \
         --train_batch_size=1 \
         --eval_batch_size=1 \

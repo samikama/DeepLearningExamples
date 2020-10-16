@@ -33,9 +33,9 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         if MPI_is_distributed(False):
             import horovod.tensorflow as hvd
             hvd.init()
-            
+        
         devices = tf.config.list_physical_devices('GPU')
-        tf.config.set_visible_devices([devices[MPI_local_rank()]], 'GPU')
+        tf.config.set_visible_devices([devices[0]], 'GPU')
         logical_devices = tf.config.list_logical_devices('GPU')
 
     tf.config.optimizer.set_experimental_options({"auto_mixed_precision": run_config.amp})
@@ -52,15 +52,15 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
             mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
     
     else:
-        for epoch in range(run_config.first_eval):
+        for epoch in range(1):
             if MPI_rank(is_herring())==0:
                 logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
-        for epoch in range(run_config.first_eval, total_epochs):
-            if MPI_rank(is_herring())==0:
-                logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
-            if MPI_rank(is_herring())==0:
-                logging.info("Running epoch {} evaluation".format(epoch+1))
-            mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval, 
-                                 use_ext=run_config.use_ext)
+            mrcnn_model.train_epoch(run_config.total_steps, broadcast=epoch==0)
+       # for epoch in range(run_config.first_eval, total_epochs):
+       #     if MPI_rank(is_herring())==0:
+       #         logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
+       #     mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+       #     if MPI_rank(is_herring())==0:
+       #         logging.info("Running epoch {} evaluation".format(epoch+1))
+       #     mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval, 
+       #                          use_ext=run_config.use_ext)

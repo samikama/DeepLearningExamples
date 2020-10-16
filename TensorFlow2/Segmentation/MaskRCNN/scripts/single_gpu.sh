@@ -13,36 +13,50 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../results_tf2_64x_novo_$1
-mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
- 
+BATCH_SIZE=1
+HOST_COUNT=1
+GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
+IMAGES=118287
+GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
+STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
+FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
+SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
+TOTAL_STEPS=$(( 13 * STEP_PER_EPOCH ))
+LR_MULTIPLIER=0.001
+BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
-/shared/rejin/conda/bin/herringrun -n 8 -c /shared/rejin/conda \
-    RUN_HERRING=1 \
+#conda_path=/shared/rejin/conda/
+#source $conda_path/etc/profile.d/conda.sh
+#conda activate base
+
+
+
+BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+rm -rf $BASEDIR/../baseline_1x
+mkdir -p $BASEDIR/../baseline_1x
     /shared/rejin/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
 	--loop_mode="tape" \
-	--box_loss_type="giou" \
         --checkpoint="/shared/rejin/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
-        --log_interval=10 \
-        --init_learning_rate=0.08 \
-        --optimizer_type="Novograd" \
-        --lr_schedule="cosine" \
-        --model_dir="$BASEDIR/../results_tf2_64x_novo_$1" \
+        --loop_mode="tape" \
+	--box_loss_type="giou" \
+        --log_interval=100 \
+        --init_learning_rate=$BASE_LR \
+        --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
+        --optimizer_type="SGD" \
+        --lr_schedule="piecewise" \
+        --model_dir="$BASEDIR/../baseline_1x" \
         --num_steps_per_eval=6000 \
         --warmup_learning_rate=0.000133 \
-	--beta1=0.9 \
-	--beta2=0.25 \
-	--warmup_steps=1000 \
-        --total_steps=1000 \
-        --l2_weight_decay=1.25e-3 \
-	--label_smoothing=0.1 \
-        --train_batch_size=1 \
+        --warmup_steps=1000 \
+        --global_gradient_clip_ratio=0.0 \
+        --total_steps=5000 \
+        --l2_weight_decay=1e-4 \
+        --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-	--first_eval=22 \
+	--first_eval=1 \
         --training_file_pattern="/home/ubuntu/fast_coco/train*.tfrecord" \
         --validation_file_pattern="/shared/data2/val*.tfrecord" \
         --val_json_file="/shared/data2/annotations/instances_val2017.json" \
@@ -50,4 +64,4 @@ mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
         --use_batched_nms \
         --xla \
         --tf2 \
-        --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_64x_novo_$1/train_eval.log
+        --use_custom_box_proposals_op | tee $BASEDIR/../baseline_1x/baseline_1x.log
