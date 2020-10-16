@@ -27,7 +27,7 @@ rm -rf $BASEDIR/../baseline_1x_tape
 mkdir -p $BASEDIR/../baseline_1x_tape
 /opt/amazon/openmpi/bin/mpirun --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile /shared/rejin/host_2/hosts_32x \
+    --hostfile /shared/rejin/host_2/hosts_8x \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
@@ -51,7 +51,7 @@ mkdir -p $BASEDIR/../baseline_1x_tape
 	--beta1=0.9 \
 	--beta2=0.25 \
 	--warmup_steps=1000 \
-        --total_steps=4000 \
+        --total_steps=2000 \
        --l2_weight_decay=1.25e-3 \
 	--label_smoothing=0.1 \
         --train_batch_size=1 \
