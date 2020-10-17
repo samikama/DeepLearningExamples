@@ -42,6 +42,19 @@ import pycocotools.mask as maskUtils
 import cv2
 
 import multiprocessing as mp
+import threading
+
+import cProfile, pstats
+
+def profile_dec(func):
+  def wrapper(*args, **kwargs):
+    with cProfile.Profile() as pr:
+      ret = func(*args, **kwargs)
+      ps = pstats.Stats(pr).sort_stats('cumtime')
+      ps.print_stats()
+    return ret
+  
+  return wrapper
 
 class MaskCOCO(COCO):
   """COCO object for mask evaluation.
@@ -169,7 +182,7 @@ class MaskCOCO(COCO):
 
     res.createIndex() # use_ext=True)
     return res
-
+  #@profile_dec
   def load_predictions_mp(self, 
                        detection_results,
                        include_mask,
@@ -188,30 +201,98 @@ class MaskCOCO(COCO):
       a list of dictionary including different prediction results from the model
         in numpy form.
     """
-    predictions = []
-    total_len = len(detection_results['source_id'])
-    num_workers = 8
-    ranges = []
-    for x in range(0,total_len, total_len//num_workers):
-      tmp = [x, x+total_len//num_workers] if x+total_len//num_workers < total_len else [x, total_len]
-      ranges.append(tmp)
+    # predictions = []
+    # total_len = len(detection_results['source_id'])
+    # num_workers = 2
+    # ranges = []
+    # for x in range(0,total_len, total_len//num_workers):
+    #   tmp = [x, x+total_len//num_workers] if x+total_len//num_workers < total_len else [x, total_len]
+    #   ranges.append(tmp)
     
-    num_workers = len(ranges)
-    procs = []
-    with mp.Manager() as manager:
-      d = manager.Queue()
-      for ii in ranges:
-        proc = mp.Process(target=load_predictions_parallel, args=(ii, include_mask, is_image_mask, detection_results, d))
-        proc.start()
-        procs.append(proc)
+    # num_workers = len(ranges)
+    # procs = []
+    # with mp.Manager() as manager:
+    #   d = manager.Queue()
+    #   for ii in ranges:
+    #     proc = mp.Process(target=load_predictions_parallel, args=(ii, include_mask, is_image_mask, detection_results, d))
+    #     proc.start()
+    #     procs.append(proc)
         
-      for proc in procs:
-        proc.join()
+    #   for proc in procs:
+    #     proc.join()
 
-      while not d.empty():
-        predictions += d.get()
+    #   while not d.empty():
+    #     predictions += d.get()
 
+    # return predictions
+
+    predictions = []
+    num_detections = detection_results['detection_scores'].size
+    current_index = 0
+    for i, image_id in enumerate(detection_results['source_id']):
+
+      if include_mask:
+        segments = generate_segmentation_from_masks(
+            detection_results['detection_masks'][i],
+            detection_results['detection_boxes'][i],
+            int(detection_results['image_info'][i][3]),
+            int(detection_results['image_info'][i][4]),
+            is_image_mask=is_image_mask
+        )
+
+        # Convert the mask to uint8 and then to fortranarray for RLE encoder.
+
+        # encoded_masks = [
+        #     maskUtils.encode(instance_mask)
+        #     for instance_mask in segments
+        # ]
+        # num_workers = 2
+        # total_len = len(segments)
+        # work_split = []
+        # for x in range(0,total_len, total_len//num_workers):
+        #   tmp = [x, x+total_len//num_workers] if x+total_len//num_workers < total_len else [x, total_len]
+        #   work_split.append(segments[tmp[0]:tmp[1]])
+
+        
+        # num_workers = len(work_split)
+        # procs = []
+        # encoded_masks = []
+        # with mp.Manager() as manager:
+        #   d = manager.Queue()
+        #   for ii in work_split:
+        #     proc = threading.Thread(target=parallel_encode, args=(ii, d))
+        #     proc.start()
+        #     procs.append(proc)
+            
+        #   for proc in procs:
+        #     proc.join()
+
+        #   while not d.empty():
+        #     encoded_masks += d.get()
+        pool = mp.dummy.Pool(processes=10)
+        encoded_masks = pool.map(maskUtils.encode, segments)
+        
+
+      for box_index in range(int(detection_results['num_detections'][i])):
+        #if current_index % 1000 == 0:
+        #  logging.info('{}/{}'.format(current_index, num_detections))
+
+        current_index += 1
+
+        prediction = {
+            'image_id': int(image_id),
+            'bbox': detection_results['detection_boxes'][i][box_index].tolist(),
+            'score': detection_results['detection_scores'][i][box_index],
+            'category_id': int(
+                detection_results['detection_classes'][i][box_index]),
+        }
+
+        if include_mask:
+          prediction['segmentation'] = encoded_masks[box_index]
+
+        predictions.append(prediction)
     return predictions
+
     
   
   def load_predictions(self,
@@ -251,8 +332,8 @@ class MaskCOCO(COCO):
         ]
 
       for box_index in range(int(detection_results['num_detections'][i])):
-        if current_index % 1000 == 0:
-          logging.info('{}/{}'.format(current_index, num_detections))
+        #if current_index % 1000 == 0:
+        #  logging.info('{}/{}'.format(current_index, num_detections))
 
         current_index += 1
 
@@ -359,6 +440,12 @@ def generate_segmentation_from_masks(masks,
   assert masks.shape[0] == len(segms)
   return segms
 
+def parallel_encode(segments, out_q):
+  encoded_masks = [
+            maskUtils.encode(instance_mask)
+            for instance_mask in segments
+        ]
+  out_q.put(encoded_masks)
 
 def load_predictions_parallel(index_range, include_mask, is_image_mask, detection_results, retQueue):
 

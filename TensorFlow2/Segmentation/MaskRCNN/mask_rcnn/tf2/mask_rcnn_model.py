@@ -34,6 +34,8 @@ from mpi4py import MPI
 from tqdm import tqdm
 import os
 
+import multiprocessing as mp
+
 import h5py
 import tensorflow as tf
 import tensorflow_addons as tfa
@@ -88,6 +90,17 @@ else:
 
 MODELS = dict()
 
+import cProfile, pstats
+
+def profile_dec(func):
+  def wrapper(*args, **kwargs):
+    with cProfile.Profile() as pr:
+      ret = func(*args, **kwargs)
+      ps = pstats.Stats(pr).sort_stats('cumtime')
+      ps.print_stats()
+    return ret
+  
+  return wrapper
 
 def create_optimizer(learning_rate, params):
     """Creates optimized based on the specified flags."""
@@ -1111,7 +1124,7 @@ class TapeModel(object):
                 'image_info': features['image_info'],
             })
         return model_outputs
-            
+    #@profile_dec
     def run_eval(self, steps, async_eval=False, use_ext=False):
         if MPI_rank(is_herring())==0:
             logging.info("Starting eval loop")
@@ -1123,7 +1136,14 @@ class TapeModel(object):
         predict_total = 0
         process_total = 0
         append_total = 0
-        start_total_infer = time.time()        
+        start_total_infer = time.time()
+        
+        in_q = mp.Queue()
+        out_q = mp.Queue()
+        stop_event = mp.Event()
+        stop_event.clear()
+        post_proc = mp.dummy.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
+        post_proc.start()
         for i in p_bar:
             start = time.time()
             features = next(self.eval_tdf)['features']
@@ -1132,26 +1152,14 @@ class TapeModel(object):
             out = self.predict(features)
             predict_time = time.time()
             predict_total += predict_time - data_load_time
-            out = evaluation.process_prediction_for_eval_batch(out)
-            process_time = time.time()
-            process_total += process_time - predict_time
-            for k, v in out.items():
-                if k not in worker_predictions:
-                    worker_predictions[k] = [v]
-                else:
-                    worker_predictions[k].append(v)
-            append_time = time.time()
-            append_total += append_time-process_time
+            #Extract numpy from tensors
+            out['image_info'] = out['image_info'].numpy()
+            out['detection_boxes'] = out['detection_boxes'].numpy()
+            in_q.put(out)
+        stop_event.set()
+        post_proc.join()
+        converted_predictions = out_q.get()
         end_total_infer = time.time()
-        coco = coco_metric.MaskCOCO()
-        _preds = copy.deepcopy(worker_predictions)
-        for k, v in _preds.items():
-            _preds[k] = np.concatenate(v, axis=0)
-        if MPI_rank(is_herring()) < 32:
-            converted_predictions = coco.load_predictions_mp(_preds, include_mask=True, is_image_mask=False)
-        else:
-            converted_predictions = []
-        end_coco_load = time.time()
         MPI.COMM_WORLD.barrier()
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
         validation_json_file=self.params.val_json_file
@@ -1181,5 +1189,32 @@ class TapeModel(object):
         #ps = pstats.Stats(pr).sort_stats('cumtime')
           #ps.print_stats()
         end_coco_eval = time.time()
-        print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total}) process ({process_total/steps}, {process_total}) append ({append_total/steps},{append_total})")
-        print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} coco Load {end_coco_load - end_total_infer} gather res {end_gather_result - end_coco_load} coco_eval {end_coco_eval - end_gather_result}")
+        print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
+        print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
+
+#@profile_dec
+def coco_pre_process(in_q, out_q, finish_input):
+      
+      coco = coco_metric.MaskCOCO()
+      #wait until event is set
+      converted_predictions = []
+      total_preproc = 0
+      while(not finish_input.is_set() or not in_q.empty()):
+        if(not in_q.empty()):
+          start = time.time()
+          worker_predictions = {}
+          out = in_q.get()
+          out = evaluation.process_prediction_for_eval_batch(out)
+          for k, v in out.items():
+              if k not in worker_predictions:
+                  worker_predictions[k] = [v]
+              else:
+                  worker_predictions[k].append(v)
+          for k, v in worker_predictions.items():
+              worker_predictions[k] = np.concatenate(v, axis=0)
+          converted_predictions += coco.load_predictions(worker_predictions, include_mask=True, is_image_mask=False)
+          end_coco_load = time.time()
+          total_preproc += end_coco_load - start
+      out_q.put(converted_predictions)
+      print(f"Total time taken to process outputs {total_preproc}")
+      return

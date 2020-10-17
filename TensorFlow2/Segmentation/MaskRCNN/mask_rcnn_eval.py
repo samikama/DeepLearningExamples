@@ -127,6 +127,7 @@ def main(argv):
 
     temp_config = FLAGS.flag_values_dict()
     for i,j in temp_config.items():
+      if MPI_rank() == 0:
         print("{}: {}".format(i,j))
     temp_config['learning_rate_decay_levels'] = [float(decay) for decay in temp_config['learning_rate_decay_levels']]
     temp_config['learning_rate_levels'] = [
