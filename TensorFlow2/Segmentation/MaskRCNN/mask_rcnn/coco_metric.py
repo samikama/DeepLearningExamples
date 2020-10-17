@@ -29,6 +29,7 @@ import atexit
 import copy
 import tempfile
 import numpy as np
+import time
 
 import tensorflow as tf
 
@@ -189,7 +190,7 @@ class MaskCOCO(COCO):
     """
     predictions = []
     total_len = len(detection_results['source_id'])
-    num_workers = 4
+    num_workers = 8
     ranges = []
     for x in range(0,total_len, total_len//num_workers):
       tmp = [x, x+total_len//num_workers] if x+total_len//num_workers < total_len else [x, total_len]
@@ -360,11 +361,13 @@ def generate_segmentation_from_masks(masks,
 
 
 def load_predictions_parallel(index_range, include_mask, is_image_mask, detection_results, retQueue):
+
   predictions = []
   current_index = 0
   num_detections = detection_results['detection_scores'].size
+  total_time_taken = 0
   for i in range(index_range[0], index_range[1]):
-    
+    start = time.time()
     image_id = detection_results['source_id'][i]
     if include_mask:
       #box_coorindates_in_image = detection_results['detection_boxes'][i]
@@ -401,6 +404,9 @@ def load_predictions_parallel(index_range, include_mask, is_image_mask, detectio
         prediction['segmentation'] = encoded_masks[box_index]
 
       predictions.append(prediction)
+    total_time_taken += time.time() - start
+  
+  print(f"Average time taken per pred {total_time_taken/current_index}, total time {total_time_taken}")
   
   retQueue.put(predictions)
   return True
