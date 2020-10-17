@@ -100,4 +100,7 @@ def default_config():
         # ---------- Eval configurations ----------
         # Visualizes images and detection boxes on TensorBoard.
         visualize_images_summary=False,
+        # SAMI use preprocessed masks from the dataset
+        preprocessed_data=False
+
     ))

@@ -31,7 +31,7 @@ def _get_source_id_from_encoded_image(parsed_tensors):
 class TfExampleDecoder(object):
     """Tensorflow Example proto decoder."""
 
-    def __init__(self, use_instance_mask=False, regenerate_source_id=False):
+    def __init__(self, use_instance_mask=False, regenerate_source_id=False,append_original=False,preprocessed=False):
         self._include_mask = use_instance_mask
         self._regenerate_source_id = regenerate_source_id
         self._keys_to_features = {
@@ -47,11 +47,17 @@ class TfExampleDecoder(object):
             'image/object/area': tf.io.VarLenFeature(tf.float32),
             'image/object/is_crowd': tf.io.VarLenFeature(tf.int64),
         }
+        self._append_original=append_original
         if use_instance_mask:
             self._keys_to_features.update({
                 'image/object/mask': tf.io.VarLenFeature(tf.string),
             })
-
+        if preprocessed:
+            self._keys_to_features.update({
+                'image/scaled_masks': tf.io.VarLenFeature(tf.float32),
+                'image/num_scaled_masks': tf.io.FixedLenFeature((), tf.int64)
+            })
+        self._preprocessed=preprocessed
     def _decode_image(self, parsed_tensors):
         """Decodes the image and set its static shape."""
         image = tf.io.decode_image(parsed_tensors['image/encoded'], channels=3)
@@ -143,7 +149,11 @@ class TfExampleDecoder(object):
             'groundtruth_area': parsed_tensors['image/object/area'],
             'groundtruth_boxes': boxes,
         }
-
+        if self._append_original:
+            decoded_tensors.update({"parsed_tensors":parsed_tensors})
+        if self._preprocessed:
+            decoded_tensors.update({"flattened_masks":parsed_tensors["image/scaled_masks"]})
+            decoded_tensors.update({"num_flattened_masks":parsed_tensors["image/num_scaled_masks"]})
         if self._include_mask:
             decoded_tensors.update({
                 'groundtruth_instance_masks': masks,

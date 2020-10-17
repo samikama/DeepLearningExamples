@@ -105,6 +105,12 @@ def define_hparams_flags():
     )
     
     flags.DEFINE_bool(
+        'preprocessed_data',
+        default=False,
+        help=('If set use precomputed masks.')
+    )
+
+    flags.DEFINE_bool(
         'disable_data_options',
         default=False,
         help=('Disable experimental data options.')
