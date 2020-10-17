@@ -332,7 +332,7 @@ def compute_coco_eval_metric_1(predictor,
 def gather_result_from_all_processes(local_results, root=0):
     from mpi4py import MPI
     comm = MPI.COMM_WORLD
-    res = comm.Gather(np.array(local_results),root=root)
+    res = comm.gather(local_results,root=root)
     return res
 
 
