@@ -1142,8 +1142,10 @@ class TapeModel(object):
         out_q = mp.Queue()
         stop_event = mp.Event()
         stop_event.clear()
-        post_proc = mp.dummy.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
+        post_proc = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
+        post_proc2 = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
         post_proc.start()
+        post_proc2.start()
         for i in p_bar:
             start = time.time()
             features = next(self.eval_tdf)['features']
@@ -1157,8 +1159,14 @@ class TapeModel(object):
             out['detection_boxes'] = out['detection_boxes'].numpy()
             in_q.put(out)
         stop_event.set()
+        #Should expect num threads items in queue
+        converted_predictions = out_q.get() + out_q.get()
         post_proc.join()
-        converted_predictions = out_q.get()
+        post_proc2.join()
+        
+        
+        
+
         end_total_infer = time.time()
         MPI.COMM_WORLD.barrier()
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
