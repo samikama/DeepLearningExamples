@@ -28,6 +28,7 @@ LR_MULTIPLIER=0.001
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 DIRECT_LAUNCH=${DIRECT_LAUNCH:-"0"}
 WITH_XLA=${WITH_XLA:-1}
+PRECALC_DATASET=${PRECALC_DATASET:-1}
 #source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -65,7 +66,7 @@ mkdir -p $BASEDIR/../baseline_1x_tape
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern="${DATA_PATH}/fast_coco/train*.tfrecord" \
+        --training_file_pattern="${DATA_PATH}/precalc_masks/train*.tfrecord" \
         --validation_file_pattern="${DATA_PATH}/nv_coco/val*.tfrecord" \
         --val_json_file="${DATA_PATH}/annotations/instances_val2017.json" \
         --amp \
@@ -75,4 +76,5 @@ mkdir -p $BASEDIR/../baseline_1x_tape
         --async_eval \
         --use_ext \
         ${PROFILE_PATH} \
+        --preprocessed_data=${PRECALC_DATASET} \
         --use_custom_box_proposals_op | tee $BASEDIR/../baseline_1x/baseline_1x.log
