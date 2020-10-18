@@ -166,7 +166,7 @@ def dataset_parser(value,
             data,
             skip_crowd_during_training=params['skip_crowd_during_training'],
             use_category=params['use_category'],
-            use_instance_mask=use_instance_mask)
+            use_instance_mask=use_instance_mask and not params["preprocessed_data"])
 
         image, image_info, boxes, instance_masks = preprocess_image(
             image,
@@ -200,8 +200,7 @@ def dataset_parser(value,
                       gt_mask_size=params['gt_mask_size'],
                       image_size=padded_image_size)
           else:
-
-
+            print("Using preprocessed data")
             flat_masks = data["flattened_masks"]
             num_flat_masks= data["num_flattened_masks"]
             padding = tf.constant(-1.0, dtype=tf.float32) * tf.ones(
