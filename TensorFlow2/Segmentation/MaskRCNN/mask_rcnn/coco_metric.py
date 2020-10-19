@@ -313,6 +313,7 @@ class MaskCOCO(COCO):
     """
     predictions = []
     num_detections = detection_results['detection_scores'].size
+    threshold = .05
     current_index = 0
     for i, image_id in enumerate(detection_results['source_id']):
 
@@ -332,19 +333,19 @@ class MaskCOCO(COCO):
         #  logging.info('{}/{}'.format(current_index, num_detections))
 
         current_index += 1
+        if(detection_results['detection_scores'][i][box_index] >= threshold):
+          prediction = {
+              'image_id': int(image_id),
+              'bbox': detection_results['detection_boxes'][i][box_index],#.tolist(),
+              'score': detection_results['detection_scores'][i][box_index],
+              'category_id': int(
+                  detection_results['detection_classes'][i][box_index]),
+          }
 
-        prediction = {
-            'image_id': int(image_id),
-            'bbox': detection_results['detection_boxes'][i][box_index].tolist(),
-            'score': detection_results['detection_scores'][i][box_index],
-            'category_id': int(
-                detection_results['detection_classes'][i][box_index]),
-        }
+          if include_mask:
+            prediction['segmentation'] = encoded_masks[box_index]
 
-        if include_mask:
-          prediction['segmentation'] = encoded_masks[box_index]
-
-        predictions.append(prediction)
+          predictions.append(prediction)
     return predictions
 
 

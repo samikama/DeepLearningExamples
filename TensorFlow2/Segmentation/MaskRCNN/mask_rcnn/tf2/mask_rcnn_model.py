@@ -1156,8 +1156,8 @@ class TapeModel(object):
             predict_time = time.time()
             predict_total += predict_time - data_load_time
             #Extract numpy from tensors
-            out['image_info'] = out['image_info'].numpy()
-            out['detection_boxes'] = out['detection_boxes'].numpy()
+            for key in out:
+              out[key] = out[key].numpy()
             in_q.put(out, False)
         stop_event.set()
         #Should expect num threads items in queue
@@ -1226,6 +1226,22 @@ def coco_pre_process(in_q, out_q, finish_input):
                   worker_predictions[k].append(v)
           for k, v in worker_predictions.items():
               worker_predictions[k] = np.concatenate(v, axis=0)
+          
+          # score_threshold = .2
+          # print(out['detection_scores'].shape, flush=True)
+          
+          # for ii in range(len(out['detection_scores'])):
+          #   thold = out['detection_scores'][ii] > score_threshold
+          #   thold_shape = out['detection_scores'][ii].shape
+          #   for key in out:
+          #     print(out[key][ii].shape, thold_shape)
+          #     if(out[key][ii].shape != thold_shape):
+          #       print(key)
+          #       continue
+          #     out[key][ii] = out[key][ii][thold]
+          
+          # print("POST",out['detection_scores'].shape, flush=True)
+
           converted_predictions += coco.load_predictions(worker_predictions, include_mask=True, is_image_mask=False)
           end_coco_load = time.time()
           total_preproc += end_coco_load - start
