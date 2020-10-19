@@ -58,7 +58,7 @@ mkdir -p $BASEDIR/../baseline_1x_tape
         --eval_batch_size=1 \
         --dist_eval \
 	--first_eval=22 \
-        --training_file_pattern="/home/ubuntu/fast_coco/train*.tfrecord" \
+        --training_file_pattern="/shared/precalc_masks/train*.tfrecord" \
         --validation_file_pattern="/shared/data2/val*.tfrecord" \
         --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \

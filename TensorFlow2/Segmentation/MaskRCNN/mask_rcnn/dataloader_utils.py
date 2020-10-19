@@ -16,11 +16,9 @@
 # limitations under the License.
 # ==============================================================================
 """Data loader and processing.
-
 Defines input_fn of Mask-RCNN for TF Estimator. The input_fn includes training
 data for category classification, bounding box regression, and number of
 positive examples to normalize the loss during training.
-
 """
 
 import tensorflow as tf
@@ -53,15 +51,18 @@ __all__ = [
     "process_targets_for_training"
 ]
 
-
 ###############################################################################################################
 
-def dataset_parser(value, mode, params, use_instance_mask, seed=None, regenerate_source_id=False):
-    """Parse data to a fixed dimension input image and learning targets.
 
+def dataset_parser(value,
+                   mode,
+                   params,
+                   use_instance_mask,
+                   seed=None,
+                   regenerate_source_id=False):
+  """Parse data to a fixed dimension input image and learning targets.
     Args:
     value: A dictionary contains an image and groundtruth annotations.
-
     Returns:
     features: a dictionary that contains the image and auxiliary
       information. The following describes {key: value} pairs in the
@@ -95,196 +96,230 @@ def dataset_parser(value, mode, params, use_instance_mask, seed=None, regenerate
       regenerate_source_id: `bool`, if True TFExampleParser will use hashed
         value of `image/encoded` for `image/source_id`.
     """
-    if mode not in [tf.estimator.ModeKeys.TRAIN, tf.estimator.ModeKeys.PREDICT, tf.estimator.ModeKeys.EVAL]:
-        raise ValueError("Unknown execution mode received: %s" % mode)
+  if mode not in [
+      tf.estimator.ModeKeys.TRAIN, tf.estimator.ModeKeys.PREDICT,
+      tf.estimator.ModeKeys.EVAL
+  ]:
+    raise ValueError("Unknown execution mode received: %s" % mode)
+  APPEND_DATA = False
 
-    def create_example_decoder():
-        return tf_example_decoder.TfExampleDecoder(
-            use_instance_mask=use_instance_mask,
-            regenerate_source_id=regenerate_source_id
-    )
+  def create_example_decoder():
+    return tf_example_decoder.TfExampleDecoder(
+        use_instance_mask=use_instance_mask,
+        regenerate_source_id=regenerate_source_id,
+        append_original=APPEND_DATA,
+        preprocessed=params["preprocessed_data"])
 
-    example_decoder = create_example_decoder()
+  example_decoder = create_example_decoder()
 
-    with tf.xla.experimental.jit_scope(compile_ops=False):
+  with tf.xla.experimental.jit_scope(compile_ops=False):
 
-        with tf.name_scope('parser'):
+    with tf.name_scope('parser'):
 
-            data = example_decoder.decode(value)
+      data = example_decoder.decode(value)
 
-            data['groundtruth_is_crowd'] = process_groundtruth_is_crowd(data)
+      data['groundtruth_is_crowd'] = process_groundtruth_is_crowd(data)
 
-            image = tf.image.convert_image_dtype(data['image'], dtype=tf.float32)
+      image = tf.image.convert_image_dtype(data['image'], dtype=tf.float32)
 
-            source_id = process_source_id(data['source_id'])
+      source_id = process_source_id(data['source_id'])
 
-            if mode == tf.estimator.ModeKeys.PREDICT:
+      if mode == tf.estimator.ModeKeys.PREDICT:
 
-                features = {
-                    'source_ids': source_id,
-                }
+        features = {
+            'source_ids': source_id,
+        }
 
-                if params['visualize_images_summary']:
-                    features['orig_images'] = tf.image.resize(image, params['image_size'])
+        if params['visualize_images_summary']:
+          features['orig_images'] = tf.image.resize(image, params['image_size'])
 
-                features["images"], features["image_info"], _, _ = preprocess_image(
-                    image,
-                    boxes=None,
-                    instance_masks=None,
-                    image_size=params['image_size'],
-                    max_level=params['max_level'],
-                    augment_input_data=False,
-                    seed=seed
-                )
+        features["images"], features["image_info"], _, _ = preprocess_image(
+            image,
+            boxes=None,
+            instance_masks=None,
+            image_size=params['image_size'],
+            max_level=params['max_level'],
+            augment_input_data=False,
+            seed=seed)
 
-                if params['include_groundtruth_in_features']:
-                    labels = prepare_labels_for_eval(
-                        data,
-                        target_num_instances=MAX_NUM_INSTANCES,
-                        target_polygon_list_len=MAX_NUM_POLYGON_LIST_LEN,
-                        use_instance_mask=params['include_mask']
-                    )
-                    return {'features': features, 'labels': labels}
+        if params['include_groundtruth_in_features']:
+          labels = prepare_labels_for_eval(
+              data,
+              target_num_instances=MAX_NUM_INSTANCES,
+              target_polygon_list_len=MAX_NUM_POLYGON_LIST_LEN,
+              use_instance_mask=params['include_mask'])
+          return {'features': features, 'labels': labels}
 
-                else:
-                    return {'features': features}
+        else:
+          return {'features': features}
 
-            elif mode == tf.estimator.ModeKeys.TRAIN:
+      elif mode == tf.estimator.ModeKeys.TRAIN:
 
-                labels = {}
-                features = {
-                    'source_ids': source_id
-                }
+        labels = {}
+        features = {'source_ids': source_id}
 
-                boxes, classes, indices, instance_masks = process_boxes_classes_indices_for_training(
-                    data,
-                    skip_crowd_during_training=params['skip_crowd_during_training'],
-                    use_category=params['use_category'],
-                    use_instance_mask=use_instance_mask
-                )
+        boxes, classes, indices, instance_masks = process_boxes_classes_indices_for_training(
+            data,
+            skip_crowd_during_training=params['skip_crowd_during_training'],
+            use_category=params['use_category'],
+            use_instance_mask=use_instance_mask and not params["preprocessed_data"])
 
-                image, image_info, boxes, instance_masks = preprocess_image(
-                    image,
-                    boxes=boxes,
-                    instance_masks=instance_masks,
-                    image_size=params['image_size'],
-                    max_level=params['max_level'],
-                    augment_input_data=params['augment_input_data'],
-                    seed=seed
-                )
+        image, image_info, boxes, instance_masks = preprocess_image(
+            image,
+            boxes=boxes,
+            instance_masks=instance_masks,
+            image_size=params['image_size'],
+            max_level=params['max_level'],
+            augment_input_data=params['augment_input_data'],
+            seed=seed)
 
-                features.update({
-                    'images': image,
-                    'image_info': image_info,
-                })
+        features.update({
+            'images': image,
+            'image_info': image_info,
+        })
 
-                padded_image_size = image.get_shape().as_list()[:2]
+        padded_image_size = image.get_shape().as_list()[:2]
 
-                # Pads cropped_gt_masks.
-                if use_instance_mask:
-                    labels['cropped_gt_masks'] = process_gt_masks_for_training(
-                        instance_masks,
-                        boxes,
-                        gt_mask_size=params['gt_mask_size'],
-                        padded_image_size=padded_image_size,
-                        max_num_instances=MAX_NUM_INSTANCES
-                    )
+        # Pads cropped_gt_masks.
+        if use_instance_mask:
+          if not params["preprocessed_data"]:
+            labels['cropped_gt_masks'] = process_gt_masks_for_training(
+                instance_masks,
+                boxes,
+                gt_mask_size=params['gt_mask_size'],
+                padded_image_size=padded_image_size,
+                max_num_instances=MAX_NUM_INSTANCES)
+            if APPEND_DATA:
+              labels["cropped_unpadded_gt_masks"] = cropped_gt_masks = preprocess_ops.crop_gt_masks(
+                      instance_masks=instance_masks,
+                      boxes=boxes,
+                      gt_mask_size=params['gt_mask_size'],
+                      image_size=padded_image_size)
+          else:
+            print("Using preprocessed data")
+            flat_masks = data["flattened_masks"]
+            num_flat_masks= data["num_flattened_masks"]
+            padding = tf.constant(-1.0, dtype=tf.float32) * tf.ones(
+                [(100 - num_flat_masks) * 116 * 116], dtype=tf.float32)
+            # tf.print("padding_shape", tf.shape(padding), "num_flat_masks",
+            #          num_flat_masks)
+            concatted = tf.concat([flat_masks, padding], axis=0)
+            # tf.print("concatted_shape", tf.shape(concatted))
+            labels['cropped_gt_masks'] = tf.reshape(concatted, (100, 116, 116))
+            # print(labels["cropped_gt_masks"].shape)
+        with tf.xla.experimental.jit_scope(compile_ops=False):
+          # Assign anchors.
+          (score_targets,
+           box_targets), input_anchor = process_targets_for_training(
+               padded_image_size=padded_image_size,
+               boxes=boxes,
+               classes=classes,
+               params=params)
 
-                with tf.xla.experimental.jit_scope(compile_ops=False):
-                    # Assign anchors.
-                    (score_targets, box_targets), input_anchor = process_targets_for_training(
-                        padded_image_size=padded_image_size,
-                        boxes=boxes,
-                        classes=classes,
-                        params=params
-                    )
+        additional_labels = process_labels_for_training(
+            image_info,
+            boxes,
+            classes,
+            score_targets,
+            box_targets,
+            max_num_instances=MAX_NUM_INSTANCES,
+            min_level=params["min_level"],
+            max_level=params["max_level"])
 
-                additional_labels = process_labels_for_training(
-                    image_info, boxes, classes, score_targets, box_targets,
-                    max_num_instances=MAX_NUM_INSTANCES,
-                    min_level=params["min_level"],
-                    max_level=params["max_level"]
-                )
+        labels.update(additional_labels)
+        # labels["input_anchor"] = input_anchor
 
-                labels.update(additional_labels)
-                # labels["input_anchor"] = input_anchor
+        # Features
+        # {
+        #   'source_ids': <tf.Tensor 'parser/StringToNumber:0' shape=() dtype=float32>,
+        #   'images': <tf.Tensor 'parser/pad_to_bounding_box/Squeeze:0' shape=(1024, 1024, 3) dtype=float32>,
+        #   'image_info': <tf.Tensor 'parser/stack_1:0' shape=(5,) dtype=float32>
+        # }
 
-                # Features
-                # {
-                #   'source_ids': <tf.Tensor 'parser/StringToNumber:0' shape=() dtype=float32>,
-                #   'images': <tf.Tensor 'parser/pad_to_bounding_box/Squeeze:0' shape=(1024, 1024, 3) dtype=float32>,
-                #   'image_info': <tf.Tensor 'parser/stack_1:0' shape=(5,) dtype=float32>
-                # }
+        FAKE_FEATURES = False
 
-                FAKE_FEATURES = False
+        if FAKE_FEATURES:
+          labels["source_ids"] = tf.ones(shape=(), dtype=tf.float32)
+          labels["images"] = tf.ones(shape=(1024, 1024, 3), dtype=tf.float32)
+          labels["image_info"] = tf.ones(shape=(5,), dtype=tf.float32)
 
-                if FAKE_FEATURES:
-                    labels["source_ids"] = tf.ones(shape=(), dtype=tf.float32)
-                    labels["images"] = tf.ones(shape=(1024, 1024, 3), dtype=tf.float32)
-                    labels["image_info"] = tf.ones(shape=(5,), dtype=tf.float32)
+        # Labels
+        # {
+        #   'cropped_gt_masks': <tf.Tensor 'parser/Reshape_4:0' shape=(100, 116, 116) dtype=float32>,
+        #   'score_targets_2': <tf.Tensor 'parser/Reshape_9:0' shape=(256, 256, 3) dtype=int32>,
+        #   'box_targets_2': <tf.Tensor 'parser/Reshape_14:0' shape=(256, 256, 12) dtype=float32>,
+        #   'score_targets_3': <tf.Tensor 'parser/Reshape_10:0' shape=(128, 128, 3) dtype=int32>,
+        #   'box_targets_3': <tf.Tensor 'parser/Reshape_15:0' shape=(128, 128, 12) dtype=float32>,
+        #   'score_targets_4': <tf.Tensor 'parser/Reshape_11:0' shape=(64, 64, 3) dtype=int32>,
+        #   'box_targets_4': <tf.Tensor 'parser/Reshape_16:0' shape=(64, 64, 12) dtype=float32>,
+        #   'score_targets_5': <tf.Tensor 'parser/Reshape_12:0' shape=(32, 32, 3) dtype=int32>,
+        #   'box_targets_5': <tf.Tensor 'parser/Reshape_17:0' shape=(32, 32, 12) dtype=float32>,
+        #   'score_targets_6': <tf.Tensor 'parser/Reshape_13:0' shape=(16, 16, 3) dtype=int32>,
+        #   'box_targets_6': <tf.Tensor 'parser/Reshape_18:0' shape=(16, 16, 12) dtype=float32>,
+        #   'gt_boxes': <tf.Tensor 'parser/Reshape_20:0' shape=(100, 4) dtype=float32>,
+        #   'gt_classes': <tf.Tensor 'parser/Reshape_22:0' shape=(100, 1) dtype=float32>
+        # }
 
-                # Labels
-                # {
-                #   'cropped_gt_masks': <tf.Tensor 'parser/Reshape_4:0' shape=(100, 116, 116) dtype=float32>,
-                #   'score_targets_2': <tf.Tensor 'parser/Reshape_9:0' shape=(256, 256, 3) dtype=int32>,
-                #   'box_targets_2': <tf.Tensor 'parser/Reshape_14:0' shape=(256, 256, 12) dtype=float32>,
-                #   'score_targets_3': <tf.Tensor 'parser/Reshape_10:0' shape=(128, 128, 3) dtype=int32>,
-                #   'box_targets_3': <tf.Tensor 'parser/Reshape_15:0' shape=(128, 128, 12) dtype=float32>,
-                #   'score_targets_4': <tf.Tensor 'parser/Reshape_11:0' shape=(64, 64, 3) dtype=int32>,
-                #   'box_targets_4': <tf.Tensor 'parser/Reshape_16:0' shape=(64, 64, 12) dtype=float32>,
-                #   'score_targets_5': <tf.Tensor 'parser/Reshape_12:0' shape=(32, 32, 3) dtype=int32>,
-                #   'box_targets_5': <tf.Tensor 'parser/Reshape_17:0' shape=(32, 32, 12) dtype=float32>,
-                #   'score_targets_6': <tf.Tensor 'parser/Reshape_13:0' shape=(16, 16, 3) dtype=int32>,
-                #   'box_targets_6': <tf.Tensor 'parser/Reshape_18:0' shape=(16, 16, 12) dtype=float32>,
-                #   'gt_boxes': <tf.Tensor 'parser/Reshape_20:0' shape=(100, 4) dtype=float32>,
-                #   'gt_classes': <tf.Tensor 'parser/Reshape_22:0' shape=(100, 1) dtype=float32>
-                # }
+        FAKE_LABELS = False
 
-                FAKE_LABELS = False
+        if FAKE_LABELS:
+          labels["cropped_gt_masks"] = tf.ones(shape=(100, 116, 116),
+                                               dtype=tf.float32)
+          labels["gt_boxes"] = tf.ones(shape=(100, 4), dtype=tf.float32)
+          labels["gt_classes"] = tf.ones(shape=(100, 1), dtype=tf.float32)
 
-                if FAKE_LABELS:
-                    labels["cropped_gt_masks"] = tf.ones(shape=(100, 116, 116), dtype=tf.float32)
-                    labels["gt_boxes"] = tf.ones(shape=(100, 4), dtype=tf.float32)
-                    labels["gt_classes"] = tf.ones(shape=(100, 1), dtype=tf.float32)
+          idx = 1
+          for dim in [256, 128, 64, 32, 16]:
+            idx += 1  # Starts at 2
 
-                    idx = 1
-                    for dim in [256, 128, 64, 32, 16]:
-                        idx += 1  # Starts at 2
+            labels["score_targets_%d" % idx] = tf.ones(shape=(dim, dim, 3),
+                                                       dtype=tf.float32)
+            labels["box_targets_%d" % idx] = tf.ones(shape=(dim, dim, 12),
+                                                     dtype=tf.float32)
 
-                        labels["score_targets_%d" % idx] = tf.ones(shape=(dim, dim, 3), dtype=tf.float32)
-                        labels["box_targets_%d" % idx] = tf.ones(shape=(dim, dim, 12), dtype=tf.float32)
+        if APPEND_DATA:
+          features["OrigData"] = data
 
-                return features, labels
+        return features, labels
+
 
 ###############################################################################################################
 
 # common functions
 
 
-def preprocess_image(image, boxes, instance_masks, image_size, max_level, augment_input_data=False, seed=None):
-    
-    image = preprocess_ops.normalize_image(image)
+def preprocess_image(image,
+                     boxes,
+                     instance_masks,
+                     image_size,
+                     max_level,
+                     augment_input_data=False,
+                     seed=None):
 
-    if augment_input_data:
-        image, boxes, instance_masks = augment_image(image=image, boxes=boxes, instance_masks=instance_masks, seed=seed)
+  image = preprocess_ops.normalize_image(image)
 
-    # Scaling and padding.
-    image, image_info, boxes, instance_masks = preprocess_ops.resize_and_pad(
-        image=image,
-        target_size=image_size,
-        stride=2 ** max_level,
-        boxes=boxes,
-        masks=instance_masks
-    )
-    return image, image_info, boxes, instance_masks
+  if augment_input_data:
+    image, boxes, instance_masks = augment_image(image=image,
+                                                 boxes=boxes,
+                                                 instance_masks=instance_masks,
+                                                 seed=seed)
+
+  # Scaling and padding.
+  image, image_info, boxes, instance_masks = preprocess_ops.resize_and_pad(
+      image=image,
+      target_size=image_size,
+      stride=2**max_level,
+      boxes=boxes,
+      masks=instance_masks)
+  return image, image_info, boxes, instance_masks
 
 
 def process_groundtruth_is_crowd(data):
-    return tf.cond(
-        pred=tf.greater(tf.size(input=data['groundtruth_is_crowd']), 0),
-        true_fn=lambda: data['groundtruth_is_crowd'],
-        false_fn=lambda: tf.zeros_like(data['groundtruth_classes'], dtype=tf.bool)
-    )
+  return tf.cond(pred=tf.greater(tf.size(input=data['groundtruth_is_crowd']),
+                                 0),
+                 true_fn=lambda: data['groundtruth_is_crowd'],
+                 false_fn=lambda: tf.zeros_like(data['groundtruth_classes'],
+                                                dtype=tf.bool))
 
 
 # def process_source_id(data):
@@ -294,177 +329,163 @@ def process_groundtruth_is_crowd(data):
 
 
 def process_source_id(source_id):
-    """Processes source_id to the right format."""
-    if source_id.dtype == tf.string:
-        source_id = tf.cast(tf.strings.to_number(source_id), tf.int64)
+  """Processes source_id to the right format."""
+  if source_id.dtype == tf.string:
+    source_id = tf.cast(tf.strings.to_number(source_id), tf.int64)
 
-    with tf.control_dependencies([source_id]):
-        source_id = tf.cond(
-            tf.equal(tf.size(source_id), 0),
-            lambda: tf.cast(tf.constant(-1), tf.int64),
-            lambda: tf.identity(source_id)
-        )
+  with tf.control_dependencies([source_id]):
+    source_id = tf.cond(tf.equal(tf.size(source_id),
+                                 0), lambda: tf.cast(tf.constant(-1), tf.int64),
+                        lambda: tf.identity(source_id))
 
-    return source_id
+  return source_id
 
 
 # eval
-def prepare_labels_for_eval(
-        data,
-        target_num_instances=MAX_NUM_INSTANCES,
-        target_polygon_list_len=MAX_NUM_POLYGON_LIST_LEN,
-        use_instance_mask=False
-):
+def prepare_labels_for_eval(data,
+                            target_num_instances=MAX_NUM_INSTANCES,
+                            target_polygon_list_len=MAX_NUM_POLYGON_LIST_LEN,
+                            use_instance_mask=False):
+  """Create labels dict for infeed from data of tf.Example."""
+  image = data['image']
 
-    """Create labels dict for infeed from data of tf.Example."""
-    image = data['image']
+  height = tf.shape(input=image)[0]
 
-    height = tf.shape(input=image)[0]
-    
-    width = tf.shape(input=image)[1]
+  width = tf.shape(input=image)[1]
 
-    boxes = data['groundtruth_boxes']
+  boxes = data['groundtruth_boxes']
 
-    classes = tf.cast(data['groundtruth_classes'], dtype=tf.float32)
+  classes = tf.cast(data['groundtruth_classes'], dtype=tf.float32)
 
-    num_labels = tf.shape(input=classes)[0]
+  num_labels = tf.shape(input=classes)[0]
 
-    boxes = preprocess_ops.pad_to_fixed_size(boxes, -1, [target_num_instances, 4])
-    classes = preprocess_ops.pad_to_fixed_size(classes, -1, [target_num_instances, 1])
+  boxes = preprocess_ops.pad_to_fixed_size(boxes, -1, [target_num_instances, 4])
+  classes = preprocess_ops.pad_to_fixed_size(classes, -1,
+                                             [target_num_instances, 1])
 
-    is_crowd = tf.cast(data['groundtruth_is_crowd'], dtype=tf.float32)
-    is_crowd = preprocess_ops.pad_to_fixed_size(is_crowd, 0, [target_num_instances, 1])
+  is_crowd = tf.cast(data['groundtruth_is_crowd'], dtype=tf.float32)
+  is_crowd = preprocess_ops.pad_to_fixed_size(is_crowd, 0,
+                                              [target_num_instances, 1])
 
-    labels = dict()
+  labels = dict()
 
-    labels['width'] = width
-    labels['height'] = height
-    labels['groundtruth_boxes'] = boxes
-    labels['groundtruth_classes'] = classes
-    labels['num_groundtruth_labels'] = num_labels
-    labels['groundtruth_is_crowd'] = is_crowd
+  labels['width'] = width
+  labels['height'] = height
+  labels['groundtruth_boxes'] = boxes
+  labels['groundtruth_classes'] = classes
+  labels['num_groundtruth_labels'] = num_labels
+  labels['groundtruth_is_crowd'] = is_crowd
 
-    if use_instance_mask:
-        data['groundtruth_polygons'] = preprocess_ops.pad_to_fixed_size(
-            data=data['groundtruth_polygons'],
-            pad_value=POLYGON_PAD_VALUE,
-            output_shape=[target_polygon_list_len, 1]
-        )
+  if use_instance_mask:
+    data['groundtruth_polygons'] = preprocess_ops.pad_to_fixed_size(
+        data=data['groundtruth_polygons'],
+        pad_value=POLYGON_PAD_VALUE,
+        output_shape=[target_polygon_list_len, 1])
 
-        if 'groundtruth_area' in data:
-            labels['groundtruth_area'] = preprocess_ops.pad_to_fixed_size(
-                data=labels['groundtruth_area'],
-                pad_value=0,
-                output_shape=[target_num_instances, 1]
-            )
+    if 'groundtruth_area' in data:
+      labels['groundtruth_area'] = preprocess_ops.pad_to_fixed_size(
+          data=labels['groundtruth_area'],
+          pad_value=0,
+          output_shape=[target_num_instances, 1])
 
-    return labels
+  return labels
 
 
 # training
 def augment_image(image, boxes, instance_masks, seed):
-    flipped_results = preprocess_ops.random_horizontal_flip(
-        image,
-        boxes=boxes,
-        masks=instance_masks,
-        seed=seed
-    )
+  flipped_results = preprocess_ops.random_horizontal_flip(image,
+                                                          boxes=boxes,
+                                                          masks=instance_masks,
+                                                          seed=seed)
 
-    if instance_masks is not None:
-        image, boxes, instance_masks = flipped_results
+  if instance_masks is not None:
+    image, boxes, instance_masks = flipped_results
 
-    else:
-        image, boxes = flipped_results
-    # multiplicative gaussian noise - speckle
-    image = preprocess_ops.add_noise(image, std=0.2, seed=seed) # add noise half of the time - std scale taken from https://openreview.net/pdf?id=SkeKtyHYPS
-    # image = tf.image.random_brightness(image, max_delta=0.1, seed=seed)
-    # image = tf.image.random_contrast(image, lower=0.9, upper=1.1, seed=seed)
-    # image = tf.image.random_saturation(image, lower=0.9, upper=1.1, seed=seed)
-    # image = tf.image.random_jpeg_quality(image, min_jpeg_quality=80, max_jpeg_quality=100, seed=seed)
+  else:
+    image, boxes = flipped_results
+  # multiplicative gaussian noise - speckle
+  image = preprocess_ops.add_noise(
+      image, std=0.2, seed=seed
+  )  # add noise half of the time - std scale taken from https://openreview.net/pdf?id=SkeKtyHYPS
+  # image = tf.image.random_brightness(image, max_delta=0.1, seed=seed)
+  # image = tf.image.random_contrast(image, lower=0.9, upper=1.1, seed=seed)
+  # image = tf.image.random_saturation(image, lower=0.9, upper=1.1, seed=seed)
+  # image = tf.image.random_jpeg_quality(image, min_jpeg_quality=80, max_jpeg_quality=100, seed=seed)
 
-    return image, boxes, instance_masks
-
-
-def process_boxes_classes_indices_for_training(data, skip_crowd_during_training, use_category, use_instance_mask):
-    boxes = data['groundtruth_boxes']
-    classes = data['groundtruth_classes']
-    classes = tf.reshape(tf.cast(classes, dtype=tf.float32), [-1, 1])
-    indices = None
-    instance_masks = None
-
-    if not use_category:
-        classes = tf.cast(tf.greater(classes, 0), dtype=tf.float32)
-
-    if skip_crowd_during_training:
-        indices = tf.where(tf.logical_not(data['groundtruth_is_crowd']))
-        classes = tf.gather_nd(classes, indices)
-        boxes = tf.gather_nd(boxes, indices)
-
-        if use_instance_mask:
-            instance_masks = tf.gather_nd(data['groundtruth_instance_masks'], indices)
-
-    return boxes, classes, indices, instance_masks
+  return image, boxes, instance_masks
 
 
-def process_gt_masks_for_training(instance_masks, boxes, gt_mask_size, padded_image_size, max_num_instances):
-    cropped_gt_masks = preprocess_ops.crop_gt_masks(
-        instance_masks=instance_masks,
-        boxes=boxes,
-        gt_mask_size=gt_mask_size,
-        image_size=padded_image_size
-    )
+def process_boxes_classes_indices_for_training(data, skip_crowd_during_training,
+                                               use_category, use_instance_mask):
+  boxes = data['groundtruth_boxes']
+  classes = data['groundtruth_classes']
+  classes = tf.reshape(tf.cast(classes, dtype=tf.float32), [-1, 1])
+  indices = None
+  instance_masks = None
 
-    # cropped_gt_masks = tf.reshape(cropped_gt_masks, [max_num_instances, -1])
+  if not use_category:
+    classes = tf.cast(tf.greater(classes, 0), dtype=tf.float32)
 
-    cropped_gt_masks = preprocess_ops.pad_to_fixed_size(
-        data=cropped_gt_masks,
-        pad_value=-1,
-        output_shape=[max_num_instances, (gt_mask_size + 4) ** 2]
-    )
+  if skip_crowd_during_training:
+    indices = tf.where(tf.logical_not(data['groundtruth_is_crowd']))
+    classes = tf.gather_nd(classes, indices)
+    boxes = tf.gather_nd(boxes, indices)
 
-    return tf.reshape(cropped_gt_masks, [max_num_instances, gt_mask_size + 4, gt_mask_size + 4])
+    if use_instance_mask:
+      instance_masks = tf.gather_nd(data['groundtruth_instance_masks'], indices)
+
+  return boxes, classes, indices, instance_masks
 
 
-def process_labels_for_training(
-    image_info, boxes, classes,
-    score_targets, box_targets,
-    max_num_instances, min_level, max_level
-):
-    labels = {}
+def process_gt_masks_for_training(instance_masks, boxes, gt_mask_size,
+                                  padded_image_size, max_num_instances):
+  cropped_gt_masks = preprocess_ops.crop_gt_masks(instance_masks=instance_masks,
+                                                  boxes=boxes,
+                                                  gt_mask_size=gt_mask_size,
+                                                  image_size=padded_image_size)
 
-    # Pad groundtruth data.
-    # boxes *= image_info[2]
-    boxes = preprocess_ops.pad_to_fixed_size(boxes, -1, [max_num_instances, 4])
+  # cropped_gt_masks = tf.reshape(cropped_gt_masks, [max_num_instances, -1])
 
-    classes = preprocess_ops.pad_to_fixed_size(classes, -1, [max_num_instances, 1])
+  cropped_gt_masks = preprocess_ops.pad_to_fixed_size(
+      data=cropped_gt_masks,
+      pad_value=-1,
+      output_shape=[max_num_instances, (gt_mask_size + 4)**2])
 
-    for level in range(min_level, max_level + 1):
-        labels['score_targets_%d' % level] = score_targets[level]
-        labels['box_targets_%d' % level] = box_targets[level]
+  return tf.reshape(cropped_gt_masks,
+                    [max_num_instances, gt_mask_size + 4, gt_mask_size + 4])
 
-    labels['gt_boxes'] = boxes
-    labels['gt_classes'] = classes
 
-    return labels
+def process_labels_for_training(image_info, boxes, classes, score_targets,
+                                box_targets, max_num_instances, min_level,
+                                max_level):
+  labels = {}
+
+  # Pad groundtruth data.
+  # boxes *= image_info[2]
+  boxes = preprocess_ops.pad_to_fixed_size(boxes, -1, [max_num_instances, 4])
+
+  classes = preprocess_ops.pad_to_fixed_size(classes, -1,
+                                             [max_num_instances, 1])
+
+  for level in range(min_level, max_level + 1):
+    labels['score_targets_%d' % level] = score_targets[level]
+    labels['box_targets_%d' % level] = box_targets[level]
+
+  labels['gt_boxes'] = boxes
+  labels['gt_classes'] = classes
+
+  return labels
 
 
 def process_targets_for_training(padded_image_size, boxes, classes, params):
-    input_anchors = anchors.Anchors(
-        params['min_level'],
-        params['max_level'],
-        params['num_scales'],
-        params['aspect_ratios'],
-        params['anchor_scale'],
-        padded_image_size
-    )
+  input_anchors = anchors.Anchors(params['min_level'], params['max_level'],
+                                  params['num_scales'], params['aspect_ratios'],
+                                  params['anchor_scale'], padded_image_size)
 
-    anchor_labeler = anchors.AnchorLabeler(
-        input_anchors,
-        params['num_classes'],
-        params['rpn_positive_overlap'],
-        params['rpn_negative_overlap'],
-        params['rpn_batch_size_per_im'],
-        params['rpn_fg_fraction']
-    )
+  anchor_labeler = anchors.AnchorLabeler(input_anchors, params['num_classes'],
+                                         params['rpn_positive_overlap'],
+                                         params['rpn_negative_overlap'],
+                                         params['rpn_batch_size_per_im'],
+                                         params['rpn_fg_fraction'])
 
-    return anchor_labeler.label_anchors(boxes, classes), input_anchors
+  return anchor_labeler.label_anchors(boxes, classes), input_anchors

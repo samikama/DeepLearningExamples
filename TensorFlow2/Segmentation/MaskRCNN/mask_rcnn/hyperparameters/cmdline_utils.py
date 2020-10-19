@@ -170,7 +170,11 @@ def define_hparams_flags():
         default=None,
         help='The directory where the model and training/evaluation summaries are stored.'
     )
-
+    flags.DEFINE_bool(
+        'preprocessed_data',
+        default=False,
+        help=('If set use precomputed masks.')
+    )
     flags.DEFINE_float("momentum", default=0.9, help="Optimizer Momentum")
     flags.DEFINE_float("beta1", default=0.9, help="novograd b1")
     flags.DEFINE_float("beta2", default=0.3, help="novograd b2")

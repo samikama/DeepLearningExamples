@@ -1042,7 +1042,11 @@ class TapeModel(object):
             tf_profiler.stop()
         else:
             runtype="TrainStep"
+            st = time.time()
             for i in p_bar:
+
+                if i == 5:
+                    st = time.time()
                 if broadcast and i==0:
                     b_w, b_o = True, True
                 elif i==0:
@@ -1063,9 +1067,10 @@ class TapeModel(object):
                     learning_rate = self.schedule(step)
                     p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
                                                                             learning_rate))
-
+            
         logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[10:])*1000.} +/- {np.std(times[10:])*1000.} ms")
         if MPI_rank(is_herring()) == 0:
+            print(f'Epoch time is {time.time() - st}')
             #print(f'average step time={np.mean(timings[10:])} +/- {np.std(timings[10:])}')
             print("Saving checkpoint...")
             self.epoch_num+=1

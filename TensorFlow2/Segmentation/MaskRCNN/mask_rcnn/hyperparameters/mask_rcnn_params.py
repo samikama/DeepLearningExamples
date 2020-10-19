@@ -99,5 +99,6 @@ def default_config():
 
         # ---------- Eval configurations ----------
         # Visualizes images and detection boxes on TensorBoard.
-        visualize_images_summary=False,
+        visualize_images_summary=False
+
     ))
