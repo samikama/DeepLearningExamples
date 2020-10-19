@@ -1126,7 +1126,7 @@ class TapeModel(object):
             })
         return model_outputs
     #@profile_dec
-    def run_eval(self, steps, async_eval=False, use_ext=False):
+    def run_eval(self, steps, batches, async_eval=False, use_ext=False):
         if MPI_rank(is_herring())==0:
             logging.info("Starting eval loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
@@ -1149,7 +1149,7 @@ class TapeModel(object):
         post_proc2.start()
         for i in p_bar:
             start = time.time()
-            features = next(self.eval_tdf)['features']
+            features = batches[i]#next(self.eval_tdf)['features']
             data_load_time = time.time()
             data_load_total += data_load_time-start
             out = self.predict(features)

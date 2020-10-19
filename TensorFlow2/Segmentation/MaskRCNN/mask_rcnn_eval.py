@@ -107,6 +107,8 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
     chkpoint_thread.start()
     last = None
     test = True
+    steps = run_config.eval_samples//eval_workers//run_config.eval_batch_size
+    batches = [next(mrcnn_model.eval_tdf)['features'] for i in range(steps)]
     while True:
         if len(q) == 0 or q[0] == last:
             pass
@@ -115,7 +117,7 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
             q.popleft()
             print("#"*20, "Running eval for", last)
             mrcnn_model.load_model(os.path.join(run_config.model_dir,last))
-            mrcnn_model.run_eval(run_config.eval_samples//eval_workers//run_config.eval_batch_size, async_eval=run_config.async_eval,
+            mrcnn_model.run_eval(steps, batches, async_eval=run_config.async_eval,
                     use_ext=run_config.use_ext)
         time.sleep(5)
 
