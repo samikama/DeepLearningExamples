@@ -35,6 +35,7 @@ from tqdm import tqdm
 import os
 
 import multiprocessing as mp
+import queue
 
 import h5py
 import tensorflow as tf
@@ -1157,7 +1158,7 @@ class TapeModel(object):
             #Extract numpy from tensors
             out['image_info'] = out['image_info'].numpy()
             out['detection_boxes'] = out['detection_boxes'].numpy()
-            in_q.put(out)
+            in_q.put(out, False)
         stop_event.set()
         #Should expect num threads items in queue
         converted_predictions = out_q.get() + out_q.get()
@@ -1206,11 +1207,17 @@ def coco_pre_process(in_q, out_q, finish_input):
       #wait until event is set
       converted_predictions = []
       total_preproc = 0
+      preproc_cnt = 0
       while(not finish_input.is_set() or not in_q.empty()):
         if(not in_q.empty()):
           start = time.time()
+          preproc_cnt +=1
           worker_predictions = {}
-          out = in_q.get()
+          try:
+            out = in_q.get(False)
+          except queue.Empty:
+            continue
+
           out = evaluation.process_prediction_for_eval_batch(out)
           for k, v in out.items():
               if k not in worker_predictions:
@@ -1225,5 +1232,5 @@ def coco_pre_process(in_q, out_q, finish_input):
         else:
           time.sleep(.05)
       out_q.put(converted_predictions)
-      print(f"Total time taken to process outputs {total_preproc}")
+      print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
       return
