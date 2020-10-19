@@ -29,10 +29,16 @@ from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils import meters
 
 from mask_rcnn.utils.decorators import atexit_hook
+from mask_rcnn.utils.herring_env import is_herring()
 
-from mask_rcnn.utils.distributed_utils import MPI_is_distributed
-from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
-from mask_rcnn.utils.distributed_utils import MPI_size
+if is_herring():
+    from mask_rcnn.utils.distributed_utils_herring import MPI_is_distributed
+    from mask_rcnn.utils.distributed_utils_herring import MPI_rank_and_size
+    from mask_rcnn.utils.distributed_utils_herring import MPI_size
+else:
+    from mask_rcnn.utils.distributed_utils import MPI_is_distributed
+    from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
+    from mask_rcnn.utils.distributed_utils import MPI_size
 
 from mask_rcnn.utils.logging_backend import LoggingBackend
 from mask_rcnn.utils.logging_backend import RuntimeMode

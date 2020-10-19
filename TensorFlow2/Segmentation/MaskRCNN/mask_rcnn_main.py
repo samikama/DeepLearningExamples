@@ -39,6 +39,10 @@ if is_herring():
     import herring.tensorflow as herring
     herring.init()
 
+    from mask_rcnn.utils.distributed_utils_herring import MPI_rank, MPI_is_distributed
+else:
+    from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
+    
 from mask_rcnn.utils.logging_formatter import logging
 
 from mask_rcnn import dataloader
@@ -58,7 +62,6 @@ import dllogger
 
 FLAGS = define_hparams_flags()
 
-from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
     mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1

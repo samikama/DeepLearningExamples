@@ -10,9 +10,15 @@ os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
 
 from mask_rcnn.utils.logging_formatter import logging
-from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_rank, MPI_size, MPI_local_rank
 from mask_rcnn.tf2.mask_rcnn_model import TapeModel
 from mask_rcnn.utils.herring_env import is_herring
+
+if is_herring():
+
+    from mask_rcnn.utils.distributed_utils_herring import MPI_is_distributed, MPI_rank, MPI_size, MPI_local_rank
+else:
+    from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_rank, MPI_size, MPI_local_rank
+
 import tensorflow as tf
 
 
