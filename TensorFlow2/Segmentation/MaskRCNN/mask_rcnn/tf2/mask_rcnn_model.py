@@ -1164,9 +1164,8 @@ class TapeModel(object):
         post_proc.join()
         post_proc2.join()
         
+        print(f"{MPI_rank(is_herring())}|Finished Joining Threads",flush=True)
         
-        
-
         end_total_infer = time.time()
         MPI.COMM_WORLD.barrier()
         predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
@@ -1223,6 +1222,8 @@ def coco_pre_process(in_q, out_q, finish_input):
           converted_predictions += coco.load_predictions(worker_predictions, include_mask=True, is_image_mask=False)
           end_coco_load = time.time()
           total_preproc += end_coco_load - start
+        else:
+          time.sleep(.05)
       out_q.put(converted_predictions)
       print(f"Total time taken to process outputs {total_preproc}")
       return
