@@ -335,73 +335,7 @@ def gather_result_from_all_processes(local_results, root=0):
   rank = comm.Get_rank()
   size = comm.Get_size()
 
-  def encode_list_long(predictions):
-    image_id = []
-    bbox = []
-    score =[]
-    category = []
-    size = np.empty((len(predictions), 2), dtype=np.int)
-    counts = []
-    counts_size = []
-    
-
-    for ii, pred in enumerate(predictions):
-      image_id.append(pred['image_id'])
-      bbox.append(pred['bbox'])
-      score.append(pred['score'])
-      category.append(pred['category_id'])
-      size[ii,:] = pred['segmentation']['size']
-      tmp = pred['segmentation']['counts']
-      counts_size.append(len(tmp))
-      counts += tmp
-      
-
-    image_id = np.array(image_id)
-    bbox = np.array(bbox)
-    score = np.array(score)
-    category = np.array(category, dtype=np.int)
-    size = np.array(size)
-    counts = np.array(counts)
-    counts_size = np.array(counts_size)
-    return image_id, bbox, score, category, size, counts, counts_size
-
-  def decode_list_long(recv_list):
-    predictions = []
-    
-    for rank in range(len(recv_list[0])):
-      counts = recv_list[5][rank].tolist()
-      cur_count_index = 0
-      for ii in range(len(recv_list[0][rank])):
-
-        tmp = {}
-        tmp['image_id'] = recv_list[0][rank][ii]
-        tmp['bbox'] = recv_list[1][rank][ii]
-        tmp['score'] = recv_list[2][rank][ii]
-        tmp['category_id'] = recv_list[3][rank][ii]
-        #Decode segmentation
-        tmp['segmentation'] = {}
-        tmp['segmentation']['size'] = recv_list[4][rank][ii]
-        counts_size = recv_list[6][rank][ii]
-        tmp['segmentation']['counts'] = bytes(counts[cur_count_index:cur_count_index+counts_size])
-        cur_count_index += counts_size
-        predictions.append(tmp)
-    return predictions
-
-  recvbuf = None
-  res = None
-  if rank == 0:
-    recv_list = []
-  
-  for each in encode_list_long(local_results): 
-    sendbuf = each
-    if rank == 0:
-        recvbuf = np.empty([size]+list(sendbuf.shape), dtype=sendbuf.dtype)
-    res = comm.Gather(sendbuf, recvbuf, root=0)
-    if(rank == 0):
-      recv_list.append(recvbuf)
-  if(rank == 0):
-    res = decode_list_long(recv_list)
-    
+  res = comm.gather(local_results, root=0)
   return res
 
 
@@ -690,16 +624,19 @@ def get_image_summary(predictions, current_step, max_images=10):
 def coco_box_eval(predictions, annotations_file):
     start = time.time()
     imgIds = []
-    box_predictions = []
-    print(predictions[0].keys())
-    for prediction in predictions:
+    box_predictions = np.empty((len(predictions), 7))
+    #print(predictions)
+    for ii, prediction in enumerate(predictions):
     #  imgIds.append(prediction['image_id'])
       #box_predictions.append( [prediction['image_id']]+ list( map(lambda x: float(round(x, 2)), prediction['bbox'][:4])) + [float(prediction['score']), prediction['category_id']] )
       #box_predictions.append( [prediction['image_id']]+ np.array(prediction['bbox'][:4], dtype=np.float).round(2).tolist() + [float(prediction['score']), prediction['category_id']] )
-      box_predictions.append( [prediction['image_id']]+ prediction['bbox'][:4] + [float(prediction['score']), prediction['category_id']] )
+      #box_predictions.append( [prediction['image_id']]+ prediction['bbox'][:4] + [float(prediction['score']), prediction['category_id']] )
+      box_predictions[ii,0] = prediction['image_id']
+      box_predictions[ii,1:5] = prediction['bbox'][:4] 
+      box_predictions[ii, 5:]= [float(prediction['score']), prediction['category_id']]
     preproc_end = time.time()
     cocoGt = COCO(annotation_file=annotations_file, use_ext=True)
-    cocoDt = cocoGt.loadRes(np.array(box_predictions), use_ext=True)
+    cocoDt = cocoGt.loadRes(box_predictions, use_ext=True)
     #cocoDt = cocoGt.loadRes(predictions, use_ext=True)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=True, num_threads=24)
     cocoEval.evaluate()
@@ -710,7 +647,6 @@ def coco_box_eval(predictions, annotations_file):
 #@profile_dec 
 def coco_mask_eval(predictions, annotations_file):
     start = time.time()
-    mask_predictions = []
     for prediction in predictions:
       del prediction['bbox']
     preproc_end = time.time()
@@ -725,9 +661,9 @@ def coco_mask_eval(predictions, annotations_file):
 def fast_eval(predictions, annotations_file):
 
     #Multi process
-    #coco_box_eval(predictions, annotations_file)
-    #coco_mask_eval(predictions, annotations_file)
-    #return
+    coco_box_eval(predictions, annotations_file)
+    coco_mask_eval(copy.deepcopy(predictions), annotations_file)
+    return
 
     box_proc = mp.Process(target=coco_box_eval, args=(predictions, annotations_file))
     mask_proc = mp.Process(target=coco_mask_eval, args=(predictions, annotations_file))
