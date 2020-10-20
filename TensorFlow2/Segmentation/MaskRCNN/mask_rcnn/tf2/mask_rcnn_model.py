@@ -1014,7 +1014,7 @@ class TapeModel(object):
         else:
             p_bar = range(steps)
         times=[]
-
+        global st
         if MPI_rank(is_herring())==0 and profile is not None:
             logging.info(f"Saving profile to {profile}")
             tf_profiler.start(profile)
@@ -1042,10 +1042,9 @@ class TapeModel(object):
             tf_profiler.stop()
         else:
             runtype="TrainStep"
-            st = time.time()
             for i in p_bar:
 
-                if i == 5:
+                if i == 5 and self.epoch_num == 0:
                     st = time.time()
                 if broadcast and i==0:
                     b_w, b_o = True, True
@@ -1070,7 +1069,8 @@ class TapeModel(object):
             
         logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[10:])*1000.} +/- {np.std(times[10:])*1000.} ms")
         if MPI_rank(is_herring()) == 0:
-            print(f'Epoch time is {time.time() - st}')
+            if self.epoch_num == 16:
+                print(f'Total time is {time.time() - st}')
             #print(f'average step time={np.mean(timings[10:])} +/- {np.std(timings[10:])}')
             print("Saving checkpoint...")
             self.epoch_num+=1
