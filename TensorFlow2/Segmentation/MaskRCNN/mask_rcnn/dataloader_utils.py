@@ -148,7 +148,7 @@ def dataset_parser(value,
         if params['visualize_images_summary']:
           features['orig_images'] = tf.image.resize(image, params['image_size'])
 
-        features["images"], features["image_info"], _, _ = preprocess_image(
+        features["images"], features["image_info"], _, _, _= preprocess_image(
             image,
             boxes=None,
             instance_masks=None,
