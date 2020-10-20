@@ -281,8 +281,8 @@ def generate_detections_gpu(class_outputs,
 
         post_nms_boxes, post_nms_scores, post_nms_classes, \
         post_nms_num_valid_boxes = tf.image.combined_non_max_suppression(
-            pre_nms_boxes,
-            pre_nms_scores,
+            tf.cast(pre_nms_boxes, dtype=tf.float32),
+            tf.cast(pre_nms_scores, dtype=tf.float32),
             max_output_size_per_class=pre_nms_num_detections,
             max_total_size=post_nms_num_detections,
             iou_threshold=nms_threshold,

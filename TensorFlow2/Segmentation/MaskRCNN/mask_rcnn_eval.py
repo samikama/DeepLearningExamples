@@ -96,19 +96,20 @@ def get_latest_checkpoint(q, checkpoint_dir, model):
 def do_eval(run_config, train_input_fn, eval_input_fn):
 
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn, is_training=True)
-    mrcnn_model.initialize_eval_model()
-
     q = deque()
     out_path = run_config.model_dir
     args=[q, out_path, mrcnn_model]
     eval_workers=min(32, MPI_size())
+    steps = run_config.eval_samples//eval_workers//run_config.eval_batch_size
+    batches = [next(mrcnn_model.eval_tdf)['features'] for i in range(steps)]
+    mrcnn_model.initialize_eval_model(batches[0])
+
     #if MPI_rank() == 0:
     chkpoint_thread = threading.Thread(target=get_latest_checkpoint, name="checkpoint thread", args=args)
     chkpoint_thread.start()
     last = None
     test = True
-    steps = run_config.eval_samples//eval_workers//run_config.eval_batch_size
-    batches = [next(mrcnn_model.eval_tdf)['features'] for i in range(steps)]
+    
     while True:
         if len(q) == 0 or q[0] == last:
             pass

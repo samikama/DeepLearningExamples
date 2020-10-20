@@ -313,7 +313,7 @@ class MaskCOCO(COCO):
     """
     predictions = []
     num_detections = detection_results['detection_scores'].size
-    threshold = .05
+    threshold = 0
     current_index = 0
     for i, image_id in enumerate(detection_results['source_id']):
 

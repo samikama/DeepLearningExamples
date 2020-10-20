@@ -366,9 +366,9 @@ class MRCNN(tf.keras.Model):
                 'detection_scores': detections[3],
             })
             # testing outputs
-            model_outputs.update({'class_outputs': tf.nn.softmax(class_outputs),
-                                  'box_outputs': box_outputs,
-                                  'anchor_boxes': rpn_box_rois})
+            #model_outputs.update({'class_outputs': tf.nn.softmax(class_outputs),
+            #                      'box_outputs': box_outputs,
+            #                      'anchor_boxes': rpn_box_rois})
         else:  # is training
             if params['box_loss_type'] != "giou":
                 encoded_box_targets = training_ops.encode_box_targets(
@@ -1028,8 +1028,7 @@ class TapeModel(object):
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
     
-    def initialize_eval_model(self):
-        features = next(self.eval_tdf)['features']
+    def initialize_eval_model(self, features):
         for _ in range(5):
           _ = self.predict(features)
           
@@ -1115,11 +1114,10 @@ class TapeModel(object):
             weights.append(file['weight'+str(i)][:])
         self.forward.set_weights(weights)
     
-
     @tf.function            
     def predict(self, features):
         labels = None
-        model_outputs = self.forward(features, labels, self.params.values(), False)
+        model_outputs = self.forward(features, labels, self.params.values(), is_training=False)
         model_outputs.update({
                 'source_id': features['source_ids'],
                 'image_info': features['image_info'],
@@ -1127,6 +1125,7 @@ class TapeModel(object):
         return model_outputs
     #@profile_dec
     def run_eval(self, steps, batches, async_eval=False, use_ext=False):
+        #steps = 5
         if MPI_rank(is_herring())==0:
             logging.info("Starting eval loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
@@ -1147,6 +1146,10 @@ class TapeModel(object):
         post_proc2 = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
         post_proc.start()
         post_proc2.start()
+
+        #if MPI_rank(is_herring())==0:
+        #  tf.profiler.experimental.start('logdir')
+
         for i in p_bar:
             start = time.time()
             features = batches[i]#next(self.eval_tdf)['features']
@@ -1164,6 +1167,10 @@ class TapeModel(object):
         converted_predictions = out_q.get() + out_q.get()
         post_proc.join()
         post_proc2.join()
+
+        #if MPI_rank(is_herring())==0:
+        #  tf.profiler.experimental.stop()
+
         
         print(f"{MPI_rank(is_herring())}|Finished Joining Threads",flush=True)
         
@@ -1248,5 +1255,5 @@ def coco_pre_process(in_q, out_q, finish_input):
         else:
           time.sleep(.05)
       out_q.put(converted_predictions)
-      print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
+      #print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
       return
