@@ -328,8 +328,17 @@ def compute_coco_eval_metric_1(predictor,
     print()  # Visual Spacing
     return eval_results, predictions
 
-
 def gather_result_from_all_processes(local_results, root=0):
+  
+  from mpi4py import MPI
+  comm = MPI.COMM_WORLD
+  rank = comm.Get_rank()
+  size = comm.Get_size()
+  res = comm.gather(local_results, root=0)
+
+  return res
+
+def gather_result_from_all_processes_G(local_results, root=0):
 
   def encode_list_long(predictions):
     image_id = []
@@ -780,6 +789,9 @@ def coco_mask_eval(predictions, annotations_file):
     print(f"Prepocessing mask {preproc_end - start} coco c++ ext {time.time() - preproc_end}")
 
 def fast_eval(predictions, annotations_file):
+    #import pickle
+    #with open("/tmp/GatherTest.pickle", 'wb') as fp:
+    #  obj = pickle.dump(predictions)
 
     #Multi process
     #coco_box_eval(predictions, annotations_file)
