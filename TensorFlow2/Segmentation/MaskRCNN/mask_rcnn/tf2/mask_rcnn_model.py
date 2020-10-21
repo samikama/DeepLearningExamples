@@ -1175,32 +1175,37 @@ class TapeModel(object):
         print(f"{MPI_rank(is_herring())}|Finished Joining Threads",flush=True)
         
         end_total_infer = time.time()
-        MPI.COMM_WORLD.barrier()
-        predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
-        validation_json_file=self.params.val_json_file
-        end_gather_result = time.time()
-        #with cProfile.Profile() as pr:
-        if MPI_rank(is_herring()) == 0:
-            all_predictions = []
-            for i, p in enumerate(predictions_list):
-                if i < 32:
-                    all_predictions.extend(p)
-            if use_ext:
-                args = [all_predictions, validation_json_file]
-                if async_eval:
-                    eval_thread = threading.Thread(target=evaluation.fast_eval,
-                                                  name="eval-thread", args=args)
-                    eval_thread.start()
-                else:
-                    evaluation.fast_eval(*args)
-            else:
-                args = [all_predictions, source_ids, True, validation_json_file]
-                if async_eval:
-                    eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
-                                                  name="eval-thread", args=args)
-                    eval_thread.start()
-                else:
-                    evaluation.compute_coco_eval_metric_n(*args)
+        if(True):
+          MPI.COMM_WORLD.barrier()
+          predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
+          validation_json_file=self.params.val_json_file
+          end_gather_result = time.time()
+          #with cProfile.Profile() as pr:
+          if MPI_rank(is_herring()) == 0:
+              all_predictions = []
+              for i, p in enumerate(predictions_list):
+                  if i < 32:
+                      all_predictions.extend(p)
+              if use_ext:
+                  args = [all_predictions, validation_json_file]
+                  if async_eval:
+                      eval_thread = threading.Thread(target=evaluation.fast_eval,
+                                                    name="eval-thread", args=args)
+                      eval_thread.start()
+                  else:
+                      evaluation.fast_eval(*args)
+              else:
+                  args = [all_predictions, source_ids, True, validation_json_file]
+                  if async_eval:
+                      eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
+                                                    name="eval-thread", args=args)
+                      eval_thread.start()
+                  else:
+                      evaluation.compute_coco_eval_metric_n(*args)
+        else:
+          validation_json_file=self.params.val_json_file
+          evaluation.fast_eval(converted_predictions, validation_json_file, False)
+
         #ps = pstats.Stats(pr).sort_stats('cumtime')
           #ps.print_stats()
         end_coco_eval = time.time()
