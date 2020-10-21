@@ -626,7 +626,7 @@ def coco_box_eval(predictions, annotations_file, use_ext):
     box_predictions = np.empty((len(predictions), 7))
     #print(predictions)
     for ii, prediction in enumerate(predictions):
-    #  imgIds.append(prediction['image_id'])
+      imgIds.append(prediction['image_id'])
       #box_predictions.append( [prediction['image_id']]+ list( map(lambda x: float(round(x, 2)), prediction['bbox'][:4])) + [float(prediction['score']), prediction['category_id']] )
       #box_predictions.append( [prediction['image_id']]+ np.array(prediction['bbox'][:4], dtype=np.float).round(2).tolist() + [float(prediction['score']), prediction['category_id']] )
       #box_predictions.append( [prediction['image_id']]+ prediction['bbox'][:4] + [float(prediction['score']), prediction['category_id']] )
@@ -638,6 +638,7 @@ def coco_box_eval(predictions, annotations_file, use_ext):
     cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)
     #cocoDt = cocoGt.loadRes(predictions, use_ext=True)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=use_ext, num_threads=24)
+    cocoEval.params.imgIds = imgIds
     cocoEval.evaluate()
     cocoEval.accumulate(dist=True)
     cocoEval.summarize()
@@ -646,12 +647,15 @@ def coco_box_eval(predictions, annotations_file, use_ext):
 #@profile_dec 
 def coco_mask_eval(predictions, annotations_file, use_ext):
     start = time.time()
+    imgIds = []
     for prediction in predictions:
       del prediction['bbox']
+      imgIds.append(prediction['image_id'])
     preproc_end = time.time()
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
     cocoDt = cocoGt.loadRes(predictions, use_ext=use_ext)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=use_ext, num_threads=24)
+    cocoEval.params.imgIds = imgIds
     cocoEval.evaluate()
     cocoEval.accumulate(dist=True)
     cocoEval.summarize()
