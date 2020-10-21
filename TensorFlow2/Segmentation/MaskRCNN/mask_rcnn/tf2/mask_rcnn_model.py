@@ -1203,6 +1203,7 @@ class TapeModel(object):
                   else:
                       evaluation.compute_coco_eval_metric_n(*args)
         else:
+          end_gather_result = time.time()
           validation_json_file=self.params.val_json_file
           evaluation.fast_eval(converted_predictions, validation_json_file, False)
 
