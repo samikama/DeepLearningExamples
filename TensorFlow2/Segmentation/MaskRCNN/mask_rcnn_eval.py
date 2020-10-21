@@ -33,6 +33,13 @@ from absl import app
 import tensorflow as tf
 from tensorflow.python.framework.ops import disable_eager_execution
 
+#from tensorflow.keras.mixed_precision import experimental as mixed_precision
+#policy = mixed_precision.Policy('mixed_float16')
+#mixed_precision.set_policy(policy)
+#Remeber to verify this runs on the OFFLOAD, Can run in Main file
+#tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
+#tf.config.optimizer.set_jit(True)
+
 from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 

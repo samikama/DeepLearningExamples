@@ -330,13 +330,134 @@ def compute_coco_eval_metric_1(predictor,
 
 
 def gather_result_from_all_processes(local_results, root=0):
+
+  def encode_list_long(predictions):
+    image_id = []
+    bbox = []
+    score =[]
+    category = []
+    size = np.empty((len(predictions), 2), dtype=np.int)
+    counts = np.empty((len(predictions), 10000), dtype=np.byte)
+    counts_size = []
+
+    max_counts = 0
+    
+
+    for ii, pred in enumerate(predictions):
+      image_id.append(pred['image_id'])
+      bbox.append(pred['bbox'])
+      score.append(pred['score'])
+      category.append(pred['category_id'])
+      size[ii,:] = pred['segmentation']['size']
+      tmp = pred['segmentation']['counts']
+      max_counts = max(max_counts, len(tmp))
+      counts_size.append(len(tmp))
+      max_counts = max(len(tmp), max_counts)
+      counts[ii, 0:len(tmp)] = np.frombuffer(tmp, dtype=np.byte)
+      
+    #print(f"Max Counts is {max_counts}")
+
+    image_id = np.array(image_id)
+    bbox = np.array(bbox)
+    score = np.array(score)
+    category = np.array(category, dtype=np.int)
+    size = np.array(size)
+    counts = np.array(counts)
+    counts_size = np.array(counts_size)
+    return image_id, bbox, score, category, size, counts, counts_size
+
+  def encode_list(predictions):
+    size = np.empty((len(predictions), 2), dtype=np.int)
+    counts = np.empty((len(predictions), 1000), dtype=np.byte)
+    compact = np.empty((len(predictions), 2, 5), dtype=np.float)
+
+    for ii, pred in enumerate(predictions):
+      size[ii,:] = pred['segmentation']['size']
+      tmp = pred['segmentation']['counts']
+      counts[ii, 0:len(tmp)] = np.frombuffer(tmp, dtype=np.byte)
+      compact[ii,0,:] = ([pred['image_id'], pred['score'], pred['category_id'], len(tmp), pred['segmentation']['size'][0]])
+      compact[ii,1,:] = (pred['bbox']+[pred['segmentation']['size'][1]])
+    
+    #counts = np.array(counts, dtype='B')
+    return compact, counts
+
+  def decode_list_long(recv_list):
+    predictions = []
+    
+    for rank in range(len(recv_list[0])):
+      cur_count_index = 0
+      for ii in range(len(recv_list[0][rank])):
+
+        tmp = {}
+        tmp['image_id'] = recv_list[0][rank][ii]
+        tmp['bbox'] = recv_list[1][rank][ii]
+        tmp['score'] = recv_list[2][rank][ii]
+        tmp['category_id'] = recv_list[3][rank][ii]
+        #Decode segmentation
+        tmp['segmentation'] = {}
+        tmp['segmentation']['size'] = recv_list[4][rank][ii]
+        counts_size = recv_list[6][rank][ii]
+        tmp['segmentation']['counts'] = bytes(recv_list[4][rank][:counts_size])
+        cur_count_index += counts_size
+        predictions.append(tmp)
+    return predictions
+        
+
+        
+
+  def decode_list(recv_list):
+    predictions = []
+    
+    for rank in range(len(recv_list[0])):
+      #counts = recv_list[1][rank].tolist()
+      cur_count_index = 0
+      for ii in range(len(recv_list[0][rank])):
+
+        tmp = {}
+        tmp['image_id'] = recv_list[0][rank][ii][0][0]
+        tmp['bbox'] = recv_list[0][rank][ii][1][:4]
+        tmp['score'] = recv_list[0][rank][ii][0][1]
+        tmp['category_id'] = recv_list[0][rank][ii][0][2]
+        #Decode segmentation
+        tmp['segmentation'] = {}
+        tmp['segmentation']['size'] = [recv_list[0][rank][ii][0][4], recv_list[0][rank][ii][1][4]]
+        counts_size = int(recv_list[0][rank][ii][0][3])
+        tmp['segmentation']['counts'] = bytes(recv_list[1][rank][:counts_size])
+        cur_count_index += counts_size
+        predictions.append(tmp)
+    return predictions
+
   from mpi4py import MPI
   comm = MPI.COMM_WORLD
   rank = comm.Get_rank()
   size = comm.Get_size()
 
-  res = comm.gather(local_results, root=0)
-  return res
+  ret = []
+  recvbuf = None
+  if rank == 0:
+    recv_list = []
+  #for each in encode_list(local_results): 
+  for each in encode_list_long(local_results): 
+    sendbuf = each
+    #sendbuf = np.zeros_like(sendbuf, dtype=np.float)
+    if rank == 0:
+        #print(sendbuf.dtype)
+        recvbuf = np.empty([size]+list(sendbuf.shape), dtype=sendbuf.dtype)
+        #recvbuf = np.empty([400], dtype='f')
+        #print(sendbuf.shape, recvbuf.shape)
+    res = comm.Gather(sendbuf, recvbuf, root=0)
+    if(rank == 0):
+      recv_list.append(recvbuf)
+      #recv_list.append(each)
+  if(rank == 0):
+    ret = decode_list_long(recv_list)
+    #ret = decode_list(recv_list)
+
+
+  #res = comm.gather(local_results, root=0)
+
+
+  return ret
 
 
 def evaluate(eval_estimator,

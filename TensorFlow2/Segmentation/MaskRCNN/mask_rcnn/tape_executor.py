@@ -15,9 +15,12 @@ from mask_rcnn.tf2.mask_rcnn_model import TapeModel
 from mask_rcnn.utils.herring_env import is_herring
 import tensorflow as tf
 
-from tensorflow.keras.mixed_precision import experimental as mixed_precision
-policy = mixed_precision.Policy('mixed_float16')
-mixed_precision.set_policy(policy)
+#from tensorflow.keras.mixed_precision import experimental as mixed_precision
+#policy = mixed_precision.Policy('mixed_float16')
+#mixed_precision.set_policy(policy)
+#Remeber to verify this runs on the OFFLOAD, Can run in Main file
+tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
+tf.config.optimizer.set_jit(True)
 
 
 def train_and_eval(run_config, train_input_fn, eval_input_fn):
