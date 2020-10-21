@@ -305,13 +305,24 @@ class MRCNN(tf.keras.Model):
                 bg_thresh_hi=params['bg_thresh_hi'],
                 bg_thresh_lo=params['bg_thresh_lo']
             )
-
+        
+        is_mlcar_transposed=False
         # Performs multi-level RoIAlign.
-        box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
-            features=fpn_feats,
-            boxes=rpn_box_rois,
+        if params["use_default_roi_align"]:
+            box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+                features=fpn_feats,
+                boxes=rpn_box_rois,
+                output_size=7,
+                is_gpu_inference=is_gpu_inference
+            )
+        else:
+
+            box_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
+            features=fpn_feats_0,
+            boxes=rpn_box_rois_0,
             output_size=7,
-            is_gpu_inference=is_gpu_inference
+            is_gpu_inference=is_gpu_inference,
+            is_transposed=is_mlcar_transposed
         )
         
         class_outputs, box_outputs, _ = self.box_head(inputs=box_roi_features)
@@ -387,12 +398,21 @@ class MRCNN(tf.keras.Model):
 
             class_indices = tf.cast(selected_class_targets, dtype=tf.int32)
 
-        mask_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
-            features=fpn_feats,
-            boxes=selected_box_rois,
-            output_size=14,
-            is_gpu_inference=is_gpu_inference
-        )
+        if params["use_default_roi_align"]:
+            mask_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+                features=fpn_feats,
+                boxes=selected_box_rois,
+                output_size=14,
+                is_gpu_inference=is_gpu_inference
+            )
+        else:
+            mask_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
+                features=fpn_feats_0,
+                boxes=selected_box_rois_0,
+                output_size=14,
+                is_gpu_inference=is_gpu_inference,
+                is_transposed=is_mlcar_transposed
+            )
         
         mask_outputs = self.mask_head(inputs=mask_roi_features, class_indices=class_indices)
 
