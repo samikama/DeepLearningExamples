@@ -663,9 +663,9 @@ def coco_mask_eval(predictions, annotations_file, use_ext):
 
 def fast_eval(predictions, annotations_file, use_ext):
     #Multi process
-    #coco_box_eval(predictions, annotations_file)
-    #coco_mask_eval(predictions, annotations_file)
-    #return
+    coco_box_eval(predictions, annotations_file)
+    coco_mask_eval(predictions, annotations_file)
+    return
 
     box_proc = mp.Process(target=coco_box_eval, args=(predictions, annotations_file,use_ext))
     mask_proc = mp.Process(target=coco_mask_eval, args=(predictions, annotations_file, use_ext))
