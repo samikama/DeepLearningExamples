@@ -1175,7 +1175,7 @@ class TapeModel(object):
         print(f"{MPI_rank(is_herring())}|Finished Joining Threads",flush=True)
         
         end_total_infer = time.time()
-        if(False):
+        if(True):
           MPI.COMM_WORLD.barrier()
           predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
           validation_json_file=self.params.val_json_file
