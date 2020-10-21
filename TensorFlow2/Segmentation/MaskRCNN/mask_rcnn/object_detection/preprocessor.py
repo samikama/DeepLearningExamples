@@ -16,25 +16,21 @@
 # limitations under the License.
 # ==============================================================================
 """Preprocess images and bounding boxes for detection.
-
 We perform two sets of operations in preprocessing stage:
 (a) operations that are applied to both training and testing data,
 (b) operations that are applied only to training data for the purpose of
     data augmentation.
-
 A preprocessing function receives a set of inputs,
 e.g. an image and bounding boxes,
 performs an operation on them, and returns them.
 Some examples are: randomly cropping the image, randomly mirroring the image,
                    randomly changing the brightness, contrast, hue and
                    randomly jittering the bounding boxes.
-
 The image is a rank 4 tensor: [1, height, width, channels] with
 dtype=tf.float32. The groundtruth_boxes is a rank 2 tensor: [N, 4] where
 in each row there is a box with [ymin xmin ymax xmax].
 Boxes are in normalized coordinates meaning
 their coordinate values range in [0, 1]
-
 Important Note: In tensor_dict, images is a rank 4 tensor, but preprocessing
 functions receive a rank 3 tensor for processing the image. Thus, inside the
 preprocess function we squeeze the image to become a rank 3 tensor and then
@@ -49,13 +45,11 @@ from mask_rcnn.object_detection import box_list
 
 def _flip_boxes_left_right(boxes):
   """Left-right flip the boxes.
-
   Args:
     boxes: rank 2 float32 tensor containing the bounding boxes -> [N, 4].
            Boxes are in normalized form meaning their coordinates vary
            between [0, 1].
            Each row is in the form of [ymin, xmin, ymax, xmax].
-
   Returns:
     Flipped boxes.
   """
@@ -68,11 +62,9 @@ def _flip_boxes_left_right(boxes):
 
 def _flip_masks_left_right(masks):
   """Left-right flip masks.
-
   Args:
     masks: rank 3 float32 tensor with shape
       [num_instances, height, width] representing instance masks.
-
   Returns:
     flipped masks: rank 3 float32 tensor with shape
       [num_instances, height, width] representing instance masks.
@@ -83,10 +75,8 @@ def _flip_masks_left_right(masks):
 def keypoint_flip_horizontal(keypoints, flip_point, flip_permutation,
                              scope=None):
   """Flips the keypoints horizontally around the flip_point.
-
   This operation flips the x coordinate for each keypoint around the flip_point
   and also permutes the keypoints in a manner specified by flip_permutation.
-
   Args:
     keypoints: a tensor of shape [num_instances, num_keypoints, 2]
     flip_point:  (float) scalar tensor representing the x coordinate to flip the
@@ -99,7 +89,6 @@ def keypoint_flip_horizontal(keypoints, flip_point, flip_permutation,
       flip_permutation might be [0, 2, 1] since we want to swap the 'left_eye'
       and 'right_eye' after a horizontal flip.
     scope: name scope.
-
   Returns:
     new_keypoints: a tensor of shape [num_instances, num_keypoints, 2]
   """
@@ -116,13 +105,12 @@ def keypoint_flip_horizontal(keypoints, flip_point, flip_permutation,
 def random_horizontal_flip(image,
                            boxes=None,
                            masks=None,
+                           precached_masks=None,
                            keypoints=None,
                            keypoint_flip_permutation=None,
                            seed=None):
   """Randomly flips the image and detections horizontally.
-
   The probability of flipping the image is 50%.
-
   Args:
     image: rank 3 float32 tensor with shape [height, width, channels].
     boxes: (optional) rank 2 float32 tensor with shape [N, 4]
@@ -139,13 +127,10 @@ def random_horizontal_flip(image,
     keypoint_flip_permutation: rank 1 int32 tensor containing the keypoint flip
                                permutation.
     seed: random seed
-
   Returns:
     image: image which is the same shape as input image.
-
     If boxes, masks, keypoints, and keypoint_flip_permutation are not None,
     the function also returns the following tensors.
-
     boxes: rank 2 float32 tensor containing the bounding boxes -> [N, 4].
            Boxes are in normalized form meaning their coordinates vary
            between [0, 1].
@@ -153,7 +138,6 @@ def random_horizontal_flip(image,
            containing instance masks.
     keypoints: rank 3 float32 tensor with shape
                [num_instances, num_keypoints, 2]
-
   Raises:
     ValueError: if keypoints are provided but keypoint_flip_permutation is not.
   """
@@ -183,10 +167,16 @@ def random_horizontal_flip(image,
     result.append(boxes)
 
   # flip masks
+
   if masks is not None:
     masks = tf.cond(pred=do_a_flip_random, true_fn=lambda: _flip_masks_left_right(masks),
                     false_fn=lambda: masks)
     result.append(masks)
+  if precached_masks is not None:
+    precached,fprecaches=tf.split(precached_masks,num_or_size_splits=2)
+    precached_masks = tf.cond(pred=do_a_flip_random, true_fn=lambda: fprecaches,
+                    false_fn=lambda: precached)
+  result.append(precached_masks)
 
   # flip keypoints
   if keypoints is not None and keypoint_flip_permutation is not None:
@@ -282,13 +272,11 @@ def resize_to_range(image,
                     align_corners=False,
                     pad_to_max_dimension=False):
   """Resizes an image so its dimensions are within the provided value.
-
   The output size can be described by two cases:
   1. If the image can be rescaled so its minimum dimension is equal to the
      provided value without the other dimension exceeding max_dimension,
      then do so.
   2. Otherwise, resize so the largest dimension is equal to max_dimension.
-
   Args:
     image: A 3D tensor of shape [height, width, channels]
     masks: (optional) rank 3 float32 tensor with shape
@@ -305,7 +293,6 @@ def resize_to_range(image,
       so the resulting image is of the spatial size
       [max_dimension, max_dimension]. If masks are included they are padded
       similarly.
-
   Returns:
     Note that the position of the resized_image_shape changes based on whether
     masks are present.
@@ -317,7 +304,6 @@ def resize_to_range(image,
       shape [num_instances, new_height, new_width].
     resized_image_shape: A 1D tensor of shape [3] containing shape of the
       resized image.
-
   Raises:
     ValueError: if the image is not a 3D tensor.
   """
@@ -355,11 +341,9 @@ def resize_to_range(image,
 
 def _copy_extra_fields(boxlist_to_copy_to, boxlist_to_copy_from):
   """Copies the extra fields of boxlist_to_copy_from to boxlist_to_copy_to.
-
   Args:
     boxlist_to_copy_to: BoxList to which extra fields are copied.
     boxlist_to_copy_from: BoxList from which fields are copied.
-
   Returns:
     boxlist_to_copy_to with extra fields.
   """
@@ -370,13 +354,11 @@ def _copy_extra_fields(boxlist_to_copy_to, boxlist_to_copy_from):
 
 def box_list_scale(boxlist, y_scale, x_scale, scope=None):
   """scale box coordinates in x and y dimensions.
-
   Args:
     boxlist: BoxList holding N boxes
     y_scale: (float) scalar tensor
     x_scale: (float) scalar tensor
     scope: name scope.
-
   Returns:
     boxlist: BoxList holding N boxes
   """
@@ -396,13 +378,11 @@ def box_list_scale(boxlist, y_scale, x_scale, scope=None):
 
 def keypoint_scale(keypoints, y_scale, x_scale, scope=None):
   """Scales keypoint coordinates in x and y dimensions.
-
   Args:
     keypoints: a tensor of shape [num_instances, num_keypoints, 2]
     y_scale: (float) scalar tensor
     x_scale: (float) scalar tensor
     scope: name scope.
-
   Returns:
     new_keypoints: a tensor of shape [num_instances, num_keypoints, 2]
   """
@@ -415,7 +395,6 @@ def keypoint_scale(keypoints, y_scale, x_scale, scope=None):
 
 def scale_boxes_to_pixel_coordinates(image, boxes, keypoints=None):
   """Scales boxes from normalized to pixel coordinates.
-
   Args:
     image: A 3D float32 tensor of shape [height, width, channels].
     boxes: A 2D float32 tensor of shape [num_boxes, 4] containing the bounding
@@ -424,7 +403,6 @@ def scale_boxes_to_pixel_coordinates(image, boxes, keypoints=None):
     keypoints: (optional) rank 3 float32 tensor with shape
       [num_instances, num_keypoints, 2]. The keypoints are in y-x normalized
       coordinates.
-
   Returns:
     image: unchanged input image.
     scaled_boxes: a 2D float32 tensor of shape [num_boxes, 4] containing the

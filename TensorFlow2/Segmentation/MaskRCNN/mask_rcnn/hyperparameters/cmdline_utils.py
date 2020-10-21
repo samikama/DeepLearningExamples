@@ -236,7 +236,13 @@ def define_hparams_flags():
     )
 
     flags.DEFINE_bool('xla', default=False, help='Enable XLA JIT Compiler.')
-
+    
+    flags.DEFINE_bool(
+        'validate_preprocessed',
+        default=False,
+        help=('If set use precomputed masks.')
+    )
+    
     flags.DEFINE_string('training_file_pattern', default="", help='TFRecords file pattern for the training files')
 
     flags.DEFINE_string('validation_file_pattern', default="", help='TFRecords file pattern for the validation files')

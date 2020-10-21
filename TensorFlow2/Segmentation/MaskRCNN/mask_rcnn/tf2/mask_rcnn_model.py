@@ -1068,6 +1068,7 @@ class TapeModel(object):
                                                                             learning_rate))
             
         logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[10:])*1000.} +/- {np.std(times[10:])*1000.} ms")
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[500:])*1000.} +/- {np.std(times[500:])*1000.} ms")
         if MPI_rank(is_herring()) == 0:
             if self.epoch_num == 16:
                 print(f'Total time is {time.time() - st}')

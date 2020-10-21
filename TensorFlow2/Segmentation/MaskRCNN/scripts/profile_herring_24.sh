@@ -19,13 +19,14 @@ WITH_XLA=${WITH_XLA:-1}
 BATCH_SIZE=1
 HOST_COUNT=1
 NUM_GPUS=8
+PRECALC_DATASET=${PRECALC_DATASET:-1}
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tf2_64x_novo_$1
 mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
  
 
-/shared/sami/conda/bin/herringrun_profile -n 8  -c /shared/sami/conda \
+/shared/sami/conda/bin/herringrun --singlenode -c /shared/sami/conda \
     RUN_HERRING=1 \
     /shared/sami/conda/bin/python  ${BASEDIR}/bind_launch.py  --direct_launch=${DIRECT_LAUNCH} --nproc_per_node=${NUM_GPUS} --nsockets_per_node=2 --ncores_per_socket=24 ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
@@ -43,18 +44,19 @@ mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
 	--beta1=0.9 \
 	--beta2=0.25 \
 	--warmup_steps=1000 \
-        --total_steps=5000 \
+        --total_steps=3000 \
         --l2_weight_decay=1.25e-3 \
 	--label_smoothing=0.1 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
         --dist_eval \
 	--first_eval=22 \
-        --training_file_pattern="/home/ubuntu/fast_coco/train*.tfrecord" \
+        --training_file_pattern="/shared/precalc_masks_latest/train*.tfrecord" \
         --validation_file_pattern="/shared/data2/val*.tfrecord" \
         --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \
         --tf2 \
+	--preprocessed_data=${PRECALC_DATASET} \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_64x_novo_$1/train_eval.log

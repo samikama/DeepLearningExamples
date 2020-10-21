@@ -27,6 +27,7 @@ from mask_rcnn import anchors
 from mask_rcnn.utils import coco_utils
 from mask_rcnn.ops import preprocess_ops
 
+
 from mask_rcnn.object_detection import tf_example_decoder
 
 MAX_NUM_INSTANCES = 100
@@ -101,14 +102,13 @@ def dataset_parser(value,
       tf.estimator.ModeKeys.EVAL
   ]:
     raise ValueError("Unknown execution mode received: %s" % mode)
-  APPEND_DATA = False
 
   def create_example_decoder():
     return tf_example_decoder.TfExampleDecoder(
         use_instance_mask=use_instance_mask,
         regenerate_source_id=regenerate_source_id,
-        append_original=APPEND_DATA,
-        preprocessed=params["preprocessed_data"])
+        append_original=False,
+        preprocessed=params["preprocessed_data"] and mode == tf.estimator.ModeKeys.TRAIN)
 
   example_decoder = create_example_decoder()
 
@@ -116,6 +116,21 @@ def dataset_parser(value,
 
     with tf.name_scope('parser'):
 
+      def get_preprocessed(data):
+          print("Using preprocessed data")
+          flat_masks = data["flattened_masks"]
+          return tf.reshape(flat_masks,(-1,116,116))
+      def pad_preprocessed(data,flipped):
+          num_flat_masks= data["num_flattened_masks"]
+          padding = tf.constant(-1.0, dtype=tf.float32) * tf.ones(
+              [(100 - num_flat_masks), 116 , 116], dtype=tf.float32)
+          # tf.print("padding_shape", tf.shape(padding), "num_flat_masks",
+          #          num_flat_masks)
+          concatted = tf.concat([flipped, padding], axis=0)
+          # tf.print("concatted_shape", tf.shape(concatted))
+          return concatted
+          #return tf.reshape(concatted, (100, 116, 116))
+          # print(labels["cropped_gt_masks"].shape)
       data = example_decoder.decode(value)
 
       data['groundtruth_is_crowd'] = process_groundtruth_is_crowd(data)
@@ -133,7 +148,7 @@ def dataset_parser(value,
         if params['visualize_images_summary']:
           features['orig_images'] = tf.image.resize(image, params['image_size'])
 
-        features["images"], features["image_info"], _, _ = preprocess_image(
+        features["images"], features["image_info"], _, _,_ = preprocess_image(
             image,
             boxes=None,
             instance_masks=None,
@@ -162,23 +177,26 @@ def dataset_parser(value,
             data,
             skip_crowd_during_training=params['skip_crowd_during_training'],
             use_category=params['use_category'],
-            use_instance_mask=use_instance_mask and not params["preprocessed_data"])
+            use_instance_mask=use_instance_mask and (not params["preprocessed_data"] or params["validate_preprocessed"]))
 
-        image, image_info, boxes, instance_masks = preprocess_image(
+        precached_masks=get_preprocessed(data) if params["preprocessed_data"] else None
+        image, image_info, boxes, instance_masks, flipped = preprocess_image(
             image,
             boxes=boxes,
             instance_masks=instance_masks,
             image_size=params['image_size'],
             max_level=params['max_level'],
             augment_input_data=params['augment_input_data'],
-            seed=seed)
-
+            seed=seed,
+            precached_masks=precached_masks)
+        #print("Afterpreproc",instance_masks,flipped)
         features.update({
             'images': image,
             'image_info': image_info,
         })
 
         padded_image_size = image.get_shape().as_list()[:2]
+
 
         # Pads cropped_gt_masks.
         if use_instance_mask:
@@ -189,24 +207,19 @@ def dataset_parser(value,
                 gt_mask_size=params['gt_mask_size'],
                 padded_image_size=padded_image_size,
                 max_num_instances=MAX_NUM_INSTANCES)
-            if APPEND_DATA:
-              labels["cropped_unpadded_gt_masks"] = cropped_gt_masks = preprocess_ops.crop_gt_masks(
-                      instance_masks=instance_masks,
-                      boxes=boxes,
-                      gt_mask_size=params['gt_mask_size'],
-                      image_size=padded_image_size)
           else:
-            print("Using preprocessed data")
-            flat_masks = data["flattened_masks"]
-            num_flat_masks= data["num_flattened_masks"]
-            padding = tf.constant(-1.0, dtype=tf.float32) * tf.ones(
-                [(100 - num_flat_masks) * 116 * 116], dtype=tf.float32)
-            # tf.print("padding_shape", tf.shape(padding), "num_flat_masks",
-            #          num_flat_masks)
-            concatted = tf.concat([flat_masks, padding], axis=0)
-            # tf.print("concatted_shape", tf.shape(concatted))
-            labels['cropped_gt_masks'] = tf.reshape(concatted, (100, 116, 116))
-            # print(labels["cropped_gt_masks"].shape)
+            labels['cropped_gt_masks'] = pad_preprocessed(data,flipped)
+            if params["validate_preprocessed"]:
+              labels["num_masks"]=data["num_flattened_masks"]
+
+              print("Generating original masks for validation")
+              labels['cropped_orig_gt_masks'] = process_gt_masks_for_training(
+                  instance_masks,
+                  boxes,
+                  gt_mask_size=params['gt_mask_size'],
+                  padded_image_size=padded_image_size,
+                  max_num_instances=MAX_NUM_INSTANCES)
+
         with tf.xla.experimental.jit_scope(compile_ops=False):
           # Assign anchors.
           (score_targets,
@@ -277,9 +290,6 @@ def dataset_parser(value,
             labels["box_targets_%d" % idx] = tf.ones(shape=(dim, dim, 12),
                                                      dtype=tf.float32)
 
-        if APPEND_DATA:
-          features["OrigData"] = data
-
         return features, labels
 
 
@@ -294,16 +304,17 @@ def preprocess_image(image,
                      image_size,
                      max_level,
                      augment_input_data=False,
-                     seed=None):
+                     seed=None,
+                     precached_masks=None):
 
   image = preprocess_ops.normalize_image(image)
-
+  #print("SAMI",instance_masks,precached_masks)
   if augment_input_data:
-    image, boxes, instance_masks = augment_image(image=image,
+    image, boxes, instance_masks, precached_masks = augment_image(image=image,
                                                  boxes=boxes,
                                                  instance_masks=instance_masks,
+                                                 precached_masks=precached_masks,
                                                  seed=seed)
-
   # Scaling and padding.
   image, image_info, boxes, instance_masks = preprocess_ops.resize_and_pad(
       image=image,
@@ -311,7 +322,8 @@ def preprocess_image(image,
       stride=2**max_level,
       boxes=boxes,
       masks=instance_masks)
-  return image, image_info, boxes, instance_masks
+  #print("SAMI resize and pad",instance_masks_padded,precached_masks)
+  return image, image_info, boxes, instance_masks, precached_masks
 
 
 def process_groundtruth_is_crowd(data):
@@ -392,17 +404,18 @@ def prepare_labels_for_eval(data,
 
 
 # training
-def augment_image(image, boxes, instance_masks, seed):
+def augment_image(image, boxes, instance_masks, precached_masks, seed):
   flipped_results = preprocess_ops.random_horizontal_flip(image,
                                                           boxes=boxes,
                                                           masks=instance_masks,
+                                                          precached_masks=precached_masks,
                                                           seed=seed)
 
   if instance_masks is not None:
-    image, boxes, instance_masks = flipped_results
+    image, boxes, instance_masks, precached_masks = flipped_results
 
   else:
-    image, boxes = flipped_results
+    image, boxes, precached_masks = flipped_results
   # multiplicative gaussian noise - speckle
   image = preprocess_ops.add_noise(
       image, std=0.2, seed=seed
@@ -411,8 +424,7 @@ def augment_image(image, boxes, instance_masks, seed):
   # image = tf.image.random_contrast(image, lower=0.9, upper=1.1, seed=seed)
   # image = tf.image.random_saturation(image, lower=0.9, upper=1.1, seed=seed)
   # image = tf.image.random_jpeg_quality(image, min_jpeg_quality=80, max_jpeg_quality=100, seed=seed)
-
-  return image, boxes, instance_masks
+  return image, boxes, instance_masks, precached_masks
 
 
 def process_boxes_classes_indices_for_training(data, skip_crowd_during_training,
@@ -445,7 +457,6 @@ def process_gt_masks_for_training(instance_masks, boxes, gt_mask_size,
                                                   image_size=padded_image_size)
 
   # cropped_gt_masks = tf.reshape(cropped_gt_masks, [max_num_instances, -1])
-
   cropped_gt_masks = preprocess_ops.pad_to_fixed_size(
       data=cropped_gt_masks,
       pad_value=-1,
