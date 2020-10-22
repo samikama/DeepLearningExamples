@@ -56,6 +56,7 @@ from pycocotools.cocoeval import COCOeval
 import multiprocessing as mp
 import cProfile, pstats
 
+mp.set_start_method('spawn')
 
 def profile_dec(func):
   def wrapper(*args, **kwargs):

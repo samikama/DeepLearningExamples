@@ -36,6 +36,7 @@ import os
 
 import multiprocessing as mp
 import queue
+mp.set_start_method('spawn')
 
 import h5py
 import tensorflow as tf
@@ -1137,6 +1138,7 @@ class TapeModel(object):
         process_total = 0
         append_total = 0
         start_total_infer = time.time()
+        print("Start method is ", mp.get_start_method())
         
         in_q = mp.Queue()
         out_q = mp.Queue()
