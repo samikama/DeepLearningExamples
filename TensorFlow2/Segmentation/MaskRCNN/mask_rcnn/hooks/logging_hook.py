@@ -29,16 +29,16 @@ from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils import meters
 
 from mask_rcnn.utils.decorators import atexit_hook
-from mask_rcnn.utils.herring_env import is_herring()
+from mask_rcnn.utils.herring_env import is_herring
 
 if is_herring():
-    from mask_rcnn.utils.distributed_utils import MPI_is_distributed
-    from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
-    from mask_rcnn.utils.distributed_utils import MPI_size
-else:
     from mask_rcnn.utils.distributed_utils_herring import MPI_is_distributed
     from mask_rcnn.utils.distributed_utils_herring import MPI_rank_and_size
     from mask_rcnn.utils.distributed_utils_herring import MPI_size
+else:
+    from mask_rcnn.utils.distributed_utils import MPI_is_distributed
+    from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
+    from mask_rcnn.utils.distributed_utils import MPI_size
 
 from mask_rcnn.utils.logging_backend import LoggingBackend
 from mask_rcnn.utils.logging_backend import RuntimeMode
@@ -62,7 +62,6 @@ class _AutoLoggingHook(tf.estimator.SessionRunHook):
     def __init__(self, log_every_n_steps=200, warmup_steps=500, is_training=True):
         """
         AutoLogging Hook for Tensorflow
-
         :param log_every_n_steps: log will be output on the console every N steps
         :param warmup_steps: integers, numbers of steps considered as warmup
         :param is_training: boolean
@@ -443,20 +442,16 @@ def get_model_variables():
 
 def get_trainable_variables():
     """Get a list of trainable TensorFlow variables.
-
     Parameters
     ----------
     train_only : boolean
         If True, only get the trainable variables.
-
     Returns
     -------
     list of Tensor
         A list of trainable TensorFlow variables
-
     Examples
     --------
-
     """
     if KERAS_MODELS or LooseVersion(tf.__version__) >= LooseVersion("2.0.0"):
         logging.warning(
@@ -499,16 +494,13 @@ def setup_tensorflow_hook(sess, logging_proxy, is_training, is_initialized):
 
             '''def count_weights_in_varlist(var_list):
                 return np.sum([np.prod(s.get_shape()) for s in var_list])
-
             logging_proxy.log_git_status()
-
             logging_proxy.log_model_statistics(
                 model_statistics={
                     "# Trainable Weights": "{:,}".format(int(count_weights_in_varlist(trainable_variables))),
                     "# Model Weights": "{:,}".format(int(count_weights_in_varlist(get_model_variables()))),
                 }
             )
-
             logging_proxy.log_trainable_variables([(var.name, var.get_shape()) for var in trainable_variables])'''
 
     else:

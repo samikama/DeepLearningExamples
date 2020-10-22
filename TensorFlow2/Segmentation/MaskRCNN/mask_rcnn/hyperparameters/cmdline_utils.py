@@ -242,7 +242,8 @@ def define_hparams_flags():
         default=False,
         help=('If set use precomputed masks.')
     )
-    
+
+    flags.DEFINE_bool('use_carl_loss', False, 'Add classification aware regression loss')    
     flags.DEFINE_string('training_file_pattern', default="", help='TFRecords file pattern for the training files')
 
     flags.DEFINE_string('validation_file_pattern', default="", help='TFRecords file pattern for the validation files')

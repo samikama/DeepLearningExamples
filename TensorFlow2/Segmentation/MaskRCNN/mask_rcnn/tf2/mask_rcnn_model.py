@@ -75,6 +75,20 @@ else:
     hvd = LazyImport("horovod.tensorflow")
     from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_local_rank, MPI_rank
 
+from tensorflow.python.profiler import profiler_v2 as tf_profiler
+from tensorflow.python.profiler.trace import Trace as prof_Trace
+try:
+    from tensorflow.python import _pywrap_nvtx as nvtx
+except ImportError:
+    class DummyNvtx:
+        def __init__(self):
+            pass
+        def push(self,a=None,b=None):
+            pass
+        def pop(self,a=None):
+            pass
+    nvtx=DummyNvtx()
+
 MODELS = dict()
 
 
@@ -1053,13 +1067,13 @@ class TapeModel(object):
                 else:
                     b_w, b_o = False, False
                 tstart=time.perf_counter()
-                #step_token=nvtx.push(f"{runtype}-{i}",runtype)
+                step_token=nvtx.push(f"{runtype}-{i}",runtype)
                 features, labels = next(self.train_tdf)
                 b_w = tf.convert_to_tensor(b_w)
                 b_o = tf.convert_to_tensor(b_o)
                 loss_dict = self.train_step(features, labels, b_w, b_o)
                 times.append(time.perf_counter()-tstart)
-                #nvtx.pop(step_token)
+                nvtx.pop(step_token)
                 if MPI_rank(is_herring())==0:
                     loss_history.append(loss_dict['total_loss'].numpy())
                     step = self.optimizer.iterations

@@ -25,7 +25,6 @@ from distutils.version import LooseVersion
 
 import tensorflow as tf
 from mask_rcnn.utils import box_utils
-import math 
 
 DEBUG_LOSS_IMPLEMENTATION = False
 
@@ -81,79 +80,7 @@ def _calculate_giou(b1, b2, mode="giou"):
     return giou
 
 
-def _calculate_ciou(b1, b2, mode="diou"):
-    """
-    Args:
-        b1: bounding box. The coordinates of the each bounding box in boxes are
-            encoded as [y_min, x_min, y_max, x_max].
-        b2: the other bounding box. The coordinates of the each bounding box
-            in boxes are encoded as [y_min, x_min, y_max, x_max].
-        mode: one of ['diou', 'ciou'], decided to calculate GIoU or IoU loss.
-    Returns:
-        GIoU loss float `Tensor`.
-    """
-    zero = tf.convert_to_tensor(0.0, b1.dtype)
-
-    b1_ymin, b1_xmin, b1_ymax, b1_xmax = tf.unstack(b1, 4, axis=-1)
-    b2_ymin, b2_xmin, b2_ymax, b2_xmax = tf.unstack(b2, 4, axis=-1)
-    b1_width = tf.maximum(zero, b1_xmax - b1_xmin)
-    b1_height = tf.maximum(zero, b1_ymax - b1_ymin)
-    b2_width = tf.maximum(zero, b2_xmax - b2_xmin)
-    b2_height = tf.maximum(zero, b2_ymax - b2_ymin)
-    b1_area = b1_width * b1_height
-    b2_area = b2_width * b2_height
-
-    intersect_ymin = tf.maximum(b1_ymin, b2_ymin)
-    intersect_xmin = tf.maximum(b1_xmin, b2_xmin)
-    intersect_ymax = tf.minimum(b1_ymax, b2_ymax)
-    intersect_xmax = tf.minimum(b1_xmax, b2_xmax)
-    intersect_width = tf.maximum(zero, intersect_xmax - intersect_xmin)
-    intersect_height = tf.maximum(zero, intersect_ymax - intersect_ymin)
-    intersect_area = intersect_width * intersect_height
-
-    union_area = b1_area + b2_area - intersect_area
-    iou = tf.math.divide_no_nan(intersect_area, union_area)
-    if mode == "iou":
-        return iou
-
-    enclose_ymin = tf.minimum(b1_ymin, b2_ymin)
-    enclose_xmin = tf.minimum(b1_xmin, b2_xmin)
-    enclose_ymax = tf.maximum(b1_ymax, b2_ymax)
-    enclose_xmax = tf.maximum(b1_xmax, b2_xmax)
-    enclose_width = tf.maximum(zero, enclose_xmax - enclose_xmin)
-    enclose_height = tf.maximum(zero, enclose_ymax - enclose_ymin)
-    enclose_area = enclose_width * enclose_height
-
-    if mode == "giou":
-        giou = iou - tf.math.divide_no_nan((enclose_area - union_area), enclose_area)
-        return giou
-
-    # CIoU - https://arxiv.org/pdf/1911.08287.pdf
-    diag_length = tf.linalg.norm([enclose_height, enclose_width]) # tf.math.square(enclose_width) + tf.math.square(enclose_height)
-    b1_center = tf.stack([(b1_ymin + b1_ymax) / 2., (b1_xmin + b1_xmax) / 2.])
-    b2_center = tf.stack([(b2_ymin + b2_ymax) / 2., (b2_xmin + b2_xmax) / 2.])
-    centers_dist = tf.linalg.norm([b1_center-b2_center])
-
-    diou = iou - tf.math.divide_no_nan(centers_dist**2, diag_length**2)
-
-    if mode == "diou":
-        return diou
-
-    arctan = tf.atan(tf.math.divide_no_nan(b1_width, b1_height)) - tf.atan(tf.math.divide_no_nan(b2_width, b2_height))
-    v = 4.0 * ((arctan / math.pi) ** 2)
-
-    # apply aspect ratio penalty only if IoU > 0.5 and GT box is in medium or large category
-    # aspect_penalty_mask = tf.cast(tf.math.logical_and(iou > 0.5, b1_area > 1024.), b1.dtype) # don't know size of box after resize!
-    aspect_penalty_mask = tf.cast(iou > 0.5, b1.dtype)
-    alpha = aspect_penalty_mask * tf.math.divide_no_nan(v, 1.0 - iou + v)
-
-    ciou = diou - alpha * v
-
-    return ciou
-
-
-
-def _giou_loss(y_true, y_pred, weights):
+def _giou_loss(y_true, y_pred, weights, reduction='sum'):
     y_pred = tf.cast(y_pred, tf.float32)
     y_true = tf.cast(y_true, y_pred.dtype)
     weights = tf.cast(weights, tf.float32)
@@ -163,25 +90,13 @@ def _giou_loss(y_true, y_pred, weights):
     giou = _calculate_giou(y_true, y_pred)
     giou_loss = 1. - giou
     giou_loss = tf.tile(tf.expand_dims(giou_loss, -1), [1, 4]) * weights # only take pos example contributions
-    giou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(giou_loss), tf.math.count_nonzero(weights, dtype=tf.float32))
+    avg_factor = tf.math.count_nonzero(weights, dtype=tf.float32)
+    if reduction == 'sum':
+        giou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(giou_loss), avg_factor)
+    else:
+        giou_loss /= avg_factor
     assert giou_loss.dtype == tf.float32
     return giou_loss
-
-
-def _ciou_loss(y_true, y_pred, weights):
-    y_pred = tf.cast(y_pred, tf.float32)
-    y_true = tf.cast(y_true, y_pred.dtype)
-    weights = tf.cast(weights, tf.float32)
-    y_true = tf.reshape(y_true, [-1, 4])
-    y_pred = tf.reshape(y_pred, [-1, 4])
-    weights = tf.reshape(weights, [-1, 4])
-    ciou = _calculate_ciou(b1=y_true, b2=y_pred, mode="ciou")
-    ciou_loss = 1. - ciou
-
-    ciou_loss = tf.tile(tf.expand_dims(ciou_loss, -1), [1, 4]) * weights # only take pos example contributions
-    ciou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(ciou_loss), tf.math.count_nonzero(weights, dtype=tf.float32))
-    assert ciou_loss.dtype == tf.float32
-    return ciou_loss
 
 
 def _l1_loss(y_true, y_pred, weights, delta=0.0):
@@ -205,13 +120,13 @@ def _l1_loss(y_true, y_pred, weights, delta=0.0):
     return l1_loss
 
 
-def _huber_loss(y_true, y_pred, weights, delta):
+def _huber_loss(y_true, y_pred, weights, delta, reduction=ReductionV2.SUM):
 
     num_non_zeros = tf.math.count_nonzero(weights, dtype=tf.float32)
 
     huber_keras_loss = tf.keras.losses.Huber(
         delta=delta,
-        reduction=ReductionV2.SUM,
+        reduction=reduction,
         name='huber_loss'
     )
 
@@ -248,21 +163,14 @@ def _huber_loss(y_true, y_pred, weights, delta):
     return huber_loss
 
 
-def _sigmoid_cross_entropy(multi_class_labels, logits, weights, sum_by_non_zeros_weights=False, label_smoothing=0.0):
+def _sigmoid_cross_entropy(multi_class_labels, logits, weights, sum_by_non_zeros_weights=False):
 
     assert weights.dtype == tf.float32
 
-#    sigmoid_cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(
-#        labels=multi_class_labels,
-#        logits=logits,
-#        name="x-entropy"
-#    )
-
-    sigmoid_cross_entropy = tf.compat.v1.losses.sigmoid_cross_entropy(
-        multi_class_labels=multi_class_labels,
+    sigmoid_cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(
+        labels=multi_class_labels,
         logits=logits,
-        label_smoothing=label_smoothing,
-        reduction=tf.compat.v1.losses.Reduction.NONE
+        name="x-entropy"
     )
 
     assert sigmoid_cross_entropy.dtype == tf.float32
@@ -349,7 +257,7 @@ def _softmax_cross_entropy(onehot_labels, logits, label_smoothing=0.0):
     return softmax_cross_entropy
 
 
-def _rpn_score_loss(score_outputs, score_targets, normalizer=1.0, label_smoothing=0.0):
+def _rpn_score_loss(score_outputs, score_targets, normalizer=1.0):
     """Computes score loss."""
 
     with tf.name_scope('rpn_score_loss'):
@@ -372,8 +280,7 @@ def _rpn_score_loss(score_outputs, score_targets, normalizer=1.0, label_smoothin
             multi_class_labels=score_targets,
             logits=score_outputs,
             weights=mask,
-            sum_by_non_zeros_weights=False,
-            label_smoothing=label_smoothing
+            sum_by_non_zeros_weights=False
         )
 
         assert score_loss.dtype == tf.float32
@@ -401,7 +308,6 @@ def _rpn_box_loss(box_outputs, box_targets, normalizer=1.0, delta=1. / 9):
         # The loss is normalized by the sum of non-zero weights before additional
         # normalizer provided by the function caller.
         box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
-        # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
         
         assert box_loss.dtype == tf.float32
 
@@ -415,7 +321,6 @@ def _rpn_box_loss(box_outputs, box_targets, normalizer=1.0, delta=1. / 9):
 
 def rpn_loss(score_outputs, box_outputs, labels, params):
     """Computes total RPN detection loss.
-
     Computes total RPN detection loss including box and score from all levels.
     Args:
     score_outputs: an OrderDict with keys representing levels and values
@@ -447,8 +352,7 @@ def rpn_loss(score_outputs, box_outputs, labels, params):
                 _rpn_score_loss(
                     score_outputs=score_outputs[level],
                     score_targets=score_targets_at_level,
-                    normalizer=tf.cast(params['train_batch_size'] * params['rpn_batch_size_per_im'], dtype=tf.float32),
-                    label_smoothing=params['label_smoothing']
+                    normalizer=tf.cast(params['train_batch_size'] * params['rpn_batch_size_per_im'], dtype=tf.float32)
                 )
             )
 
@@ -497,21 +401,61 @@ def _fast_rcnn_box_loss(box_outputs, box_targets, class_targets, loss_type='hube
             box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
         elif loss_type == 'giou':
             box_loss = _giou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask)
-        elif loss_type == 'ciou':
-            box_loss = _ciou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask)
         else:
             # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
             raise NotImplementedError
-        
         if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
             box_loss /= normalizer
 
     return box_loss
 
 
+
+def _fast_rcnn_box_carl_loss(box_outputs, box_targets, class_targets,
+            class_outputs, beta=0.2, gamma=1.0, num_classes=91,
+            loss_type='huber', normalizer=1.0, delta=1.):
+    """Computes classification aware box regression loss."""
+
+    with tf.name_scope('fast_rcnn_carl_loss'):
+        mask = tf.tile(tf.expand_dims(tf.greater(class_targets, 0), axis=2), [1, 1, 4])
+
+        # The loss is normalized by the sum of non-zero weights before additional
+        # normalizer provided by the function caller.
+        if loss_type == 'huber':
+            box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta, reduction=ReductionV2.NONE)
+        elif loss_type == 'giou':
+            box_loss = _giou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, reduction='none')
+            box_loss = tf.reshape(box_loss, [-1, 512, 4]) # FIXME
+        elif loss_type == 'ciou':
+            box_loss = _ciou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask)
+        else:
+            raise NotImplementedError
+
+        oh_targets = tf.one_hot(class_targets, depth=num_classes)
+        class_scores = tf.nn.softmax(class_outputs, axis=-1)
+        top_class_score = class_scores * oh_targets
+        pos_cls_score = top_class_score[:,:,1:] # ignore GT score
+        pos_cls_score = tf.reduce_max(pos_cls_score, axis=-1)
+        carl_loss_weights = tf.pow(beta + (1. - beta) * pos_cls_score, gamma)
+        # zero out bias contributions from zero pos_cls_scores (GTs)
+        carl_loss_weights = tf.where(pos_cls_score > 0.0, carl_loss_weights, tf.zeros_like(carl_loss_weights))
+        # normalize carl_loss_weight to make its sum equal to num positive
+        num_pos = tf.math.count_nonzero(class_targets, dtype=carl_loss_weights.dtype)
+        weight_ratio = tf.math.divide_no_nan(num_pos, tf.reduce_sum(carl_loss_weights))
+        carl_loss_weights *= weight_ratio
+
+        loss_carl = tf.reduce_sum(box_loss * tf.expand_dims(carl_loss_weights, -1))
+        loss_bbox = tf.reduce_sum(box_loss)
+        regression_loss = loss_carl + loss_bbox
+
+        if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
+            regression_loss /= normalizer
+        return regression_loss
+
+
+
 def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_box_rois, image_info, params):
     """Computes the box and class loss (Fast-RCNN branch) of Mask-RCNN.
-
     This function implements the classification and box regression loss of the
     Fast-RCNN branch in Mask-RCNN. As the `box_outputs` produces `num_classes`
     boxes for each RoI, the reference model expands `box_targets` to match the
@@ -519,12 +463,9 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
     overlap. (Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/roi_data/fast_rcnn.py)
     Instead, this function selects the `box_outputs` by the `class_targets` so
     that it doesn't expand `box_targets`.
-
     The loss computation has two parts: (1) classification loss is softmax on all
     RoIs. (2) box loss is smooth L1-loss on only positive samples of RoIs.
     Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/modeling/fast_rcnn_heads.py
-
-
     Args:
     class_outputs: a float tensor representing the class prediction for each box
       with a shape of [batch_size, num_boxes, num_classes].
@@ -566,7 +507,7 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
             tf.reshape(box_outputs, [-1, 4])
         )
 
-        if params['box_loss_type'] in ['giou', 'ciou']:
+        if params['box_loss_type'] == 'giou':
             # decode outputs to move deltas back to coordinate space
             rpn_box_rois = tf.reshape(rpn_box_rois, [-1, 4])
             box_outputs = box_utils.decode_boxes(encoded_boxes=box_outputs, anchors=rpn_box_rois, weights=params['bbox_reg_weights'])
@@ -575,13 +516,24 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
 
 
         box_outputs = tf.reshape(box_outputs, [batch_size, -1, 4])
-        box_loss = _fast_rcnn_box_loss(
-            box_outputs=box_outputs,
-            box_targets=box_targets,
-            class_targets=class_targets,
-            loss_type=params['box_loss_type'],
-            normalizer=1.0
-        )
+        if not params['use_carl_loss']:
+            box_loss = _fast_rcnn_box_loss(
+                box_outputs=box_outputs,
+                box_targets=box_targets,
+                class_targets=class_targets,
+                loss_type=params['box_loss_type'],
+                normalizer=1.0
+            )
+        else:
+            box_loss = _fast_rcnn_box_carl_loss(
+                box_outputs=box_outputs,
+                box_targets=box_targets,
+                class_targets=class_targets,
+                class_outputs=class_outputs,
+                loss_type=params['box_loss_type'],
+                normalizer=2.0
+            )
+
         box_loss *= params['fast_rcnn_box_loss_weight']
 
         use_sparse_x_entropy = False
@@ -595,13 +547,11 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
         )
 
         total_loss = class_loss + box_loss
-
     return total_loss, class_loss, box_loss
 
 
 def mask_rcnn_loss(mask_outputs, mask_targets, select_class_targets, params):
     """Computes the mask loss of Mask-RCNN.
-
     This function implements the mask loss of Mask-RCNN. As the `mask_outputs`
     produces `num_classes` masks for each RoI, the reference model expands
     `mask_targets` to match the shape of `mask_outputs` and selects only the
@@ -610,7 +560,6 @@ def mask_rcnn_loss(mask_outputs, mask_targets, select_class_targets, params):
     Instead, this implementation selects the `mask_outputs` by the `class_targets`
     so that it doesn't expand `mask_targets`. Note that the selection logic is
     done in the post-processing of mask_rcnn_fn in mask_rcnn_architecture.py.
-
     Args:
     mask_outputs: a float tensor representing the prediction for each mask,
       with a shape of
@@ -638,8 +587,7 @@ def mask_rcnn_loss(mask_outputs, mask_targets, select_class_targets, params):
             multi_class_labels=mask_targets,
             logits=mask_outputs,
             weights=weights,
-            sum_by_non_zeros_weights=True,
-            label_smoothing=params['label_smoothing']
+            sum_by_non_zeros_weights=True
         )
 
         mrcnn_loss = params['mrcnn_weight_loss_mask'] * loss

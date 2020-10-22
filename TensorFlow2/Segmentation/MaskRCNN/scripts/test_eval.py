@@ -37,11 +37,11 @@ from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 
 from mask_rcnn import dataloader
-from mask_rcnn import distributed_executer
-from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
-from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
-from mask_rcnn import session_executor
-from mask_rcnn import tape_executor
+#from mask_rcnn import distributed_executer
+#from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
+#from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
+#from mask_rcnn import session_executor
+#from mask_rcnn import tape_executor
 from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn.hyperparameters import params_io
 from mask_rcnn.tf2.mask_rcnn_model import TapeModel
@@ -89,7 +89,7 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
     out_path = run_config.model_dir
     #eval_workers=min(32, MPI_size())
     eval_workers=8
-    last = "weights_16.h5"
+    last = "weights_01.h5"
     mrcnn_model.load_model(os.path.join(run_config.model_dir,last))
     mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval,
              use_ext=run_config.use_ext)

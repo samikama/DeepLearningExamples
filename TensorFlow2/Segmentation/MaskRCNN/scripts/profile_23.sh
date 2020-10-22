@@ -18,6 +18,7 @@ WITH_XLA=${WITH_XLA:-1}
 BATCH_SIZE=1
 HOST_COUNT=1
 NUM_GPUS=8
+PRECALC_DATASET=1
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tf2_64x_novo_$1
@@ -27,11 +28,12 @@ rm -rf $BASEDIR/../baseline_1x_tape
 mkdir -p $BASEDIR/../baseline_1x_tape
 /opt/amazon/openmpi/bin/mpirun --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile /shared/rejin/host_1/hosts_32x \
     -x NCCL_DEBUG=VERSION \
+    --hostfile /shared/rejin/hosts_64x \
     -x LD_LIBRARY_PATH \
     -x PATH \
     -N 8 \
+    -x FI_PROVIDER="efa" \
     --oversubscribe \
     --bind-to none \
     bash launcher.sh \
@@ -51,18 +53,20 @@ mkdir -p $BASEDIR/../baseline_1x_tape
 	--beta1=0.9 \
 	--beta2=0.25 \
 	--warmup_steps=1000 \
-        --total_steps=4000 \
+        --total_steps=2000 \
         --l2_weight_decay=1.25e-3 \
+	--use_carl_loss \
 	--label_smoothing=0.1 \
         --train_batch_size=1 \
         --eval_batch_size=1 \
         --dist_eval \
 	--first_eval=22 \
-        --training_file_pattern="/shared/precalc_masks_512/train*.tfrecord" \
+        --training_file_pattern="/scratch/precalc_masks_latest/train*.tfrecord" \
         --validation_file_pattern="/shared/data2/val*.tfrecord" \
         --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \
         --tf2 \
+	--preprocessed_data=${PRECALC_DATASET} \
         --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_64x_novo_$1/train_eval.log

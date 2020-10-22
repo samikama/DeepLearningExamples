@@ -34,11 +34,12 @@ mkdir -p $BASEDIR/../baseline_1x
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     -x RDMAV_FORK_SAFE=1 \
-    --np 8 -H localhost:8 \
+    --hostfile /shared/rejin/hosts_1x \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
+    bash launcher.sh \
     python ${BASEDIR}/test_eval.py \
         --mode="train_and_eval" \
         --checkpoint="/shared/rejin/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
@@ -49,7 +50,7 @@ mkdir -p $BASEDIR/../baseline_1x
         --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../results_tape_1x" \
+        --model_dir="/shared/rejin/DeepLearningExamples/Tensorflow2/Segmentation/MaskRCNN/results_tf2_64x_novo_/" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
         --warmup_steps=1000 \
@@ -59,9 +60,9 @@ mkdir -p $BASEDIR/../baseline_1x
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern="/home/ubuntu/nv_tfrecords/train*.tfrecord" \
-        --validation_file_pattern="/shared/rejin/data/nv_tfrecords/val*.tfrecord" \
-        --val_json_file="/shared/rejin/data/nv_tfrecords/annotations/instances_val2017.json" \
+        --training_file_pattern="/shared/data2/train*.tfrecord" \
+        --validation_file_pattern="/shared/data2/val*.tfrecord" \
+        --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \
