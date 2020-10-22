@@ -126,7 +126,7 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
             print("#"*20, "Running eval for", last)
             mrcnn_model.load_model(os.path.join(run_config.model_dir,last))
             mrcnn_model.run_eval(steps, batches, async_eval=run_config.async_eval,
-                    use_ext=run_config.use_ext)
+                    use_ext=run_config.use_ext, use_dist_coco_eval=run_config.dist_coco_eval)
         time.sleep(5)
 
 def main(argv):

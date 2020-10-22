@@ -1124,7 +1124,7 @@ class TapeModel(object):
             })
         return model_outputs
     #@profile_dec
-    def run_eval(self, steps, batches, async_eval=False, use_ext=False):
+    def run_eval(self, steps, batches, async_eval=False, use_ext=False, use_dist_coco_eval=False):
         #steps = 5
         if MPI_rank(is_herring())==0:
             logging.info("Starting eval loop")
@@ -1175,7 +1175,7 @@ class TapeModel(object):
         print(f"{MPI_rank(is_herring())}|Finished Joining Threads",flush=True)
         
         end_total_infer = time.time()
-        if(True):
+        if(not use_dist_coco_eval):
           MPI.COMM_WORLD.barrier()
           predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
           validation_json_file=self.params.val_json_file
@@ -1187,7 +1187,7 @@ class TapeModel(object):
                   if i < 32:
                       all_predictions.extend(p)
               if use_ext:
-                  args = [all_predictions, validation_json_file]
+                  args = [all_predictions, validation_json_file, use_ext, False]
                   if async_eval:
                       eval_thread = threading.Thread(target=evaluation.fast_eval,
                                                     name="eval-thread", args=args)
@@ -1205,7 +1205,7 @@ class TapeModel(object):
         else:
           end_gather_result = time.time()
           validation_json_file=self.params.val_json_file
-          evaluation.fast_eval(converted_predictions, validation_json_file, False)
+          evaluation.fast_eval(converted_predictions, validation_json_file, use_ext, use_dist_coco_eval)
 
         #ps = pstats.Stats(pr).sort_stats('cumtime')
           #ps.print_stats()

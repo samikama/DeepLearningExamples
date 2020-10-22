@@ -620,7 +620,7 @@ def get_image_summary(predictions, current_step, max_images=10):
     return summaries
 
 #@profile_dec 
-def coco_box_eval(predictions, annotations_file, use_ext):
+def coco_box_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     start = time.time()
     imgIds = []
     box_predictions = np.empty((len(predictions), 7))
@@ -640,12 +640,12 @@ def coco_box_eval(predictions, annotations_file, use_ext):
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=use_ext, num_threads=24)
     cocoEval.params.imgIds = imgIds
     cocoEval.evaluate()
-    cocoEval.accumulate(dist=True)
+    cocoEval.accumulate(dist=use_dist_coco_eval)
     cocoEval.summarize()
     print(f"Prepocessing box {preproc_end - start} coco c++ ext {time.time() - preproc_end}")
 
 #@profile_dec 
-def coco_mask_eval(predictions, annotations_file, use_ext):
+def coco_mask_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     start = time.time()
     imgIds = []
     for prediction in predictions:
@@ -657,18 +657,18 @@ def coco_mask_eval(predictions, annotations_file, use_ext):
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=use_ext, num_threads=24)
     cocoEval.params.imgIds = imgIds
     cocoEval.evaluate()
-    cocoEval.accumulate(dist=True)
+    cocoEval.accumulate(dist=use_dist_coco_eval)
     cocoEval.summarize()
     print(f"Prepocessing mask {preproc_end - start} coco c++ ext {time.time() - preproc_end}")
 
-def fast_eval(predictions, annotations_file, use_ext):
+def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     #Multi process
     #coco_box_eval(predictions, annotations_file, use_ext)
     #coco_mask_eval(predictions, annotations_file, use_ext)
     #return
 
-    box_proc = mp.Process(target=coco_box_eval, args=(predictions, annotations_file,use_ext))
-    mask_proc = mp.Process(target=coco_mask_eval, args=(predictions, annotations_file, use_ext))
+    box_proc = mp.Process(target=coco_box_eval, args=(predictions, annotations_file,use_ext, use_dist_coco_eval))
+    mask_proc = mp.Process(target=coco_mask_eval, args=(predictions, annotations_file, use_ext, use_dist_coco_eval))
     box_proc.start()
     mask_proc.start()
     box_proc.join()

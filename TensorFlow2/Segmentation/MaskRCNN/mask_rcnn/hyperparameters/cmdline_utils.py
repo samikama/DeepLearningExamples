@@ -150,7 +150,13 @@ def define_hparams_flags():
         help=('use c++ extionsion for fast eval (must have nvidia pycocotools).'
         )
     )
-    
+
+    flags.DEFINE_bool(
+        'dist_coco_eval',
+        default=False,
+        help=('use distributed coco eval (must have aws pycocotools).'
+        )
+    )
 
     # Gradient clipping is a fairly coarse heuristic to stabilize training.
     # This model clips the gradient by its L2 norm globally (i.e., across
