@@ -671,21 +671,22 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
       box_predictions[ii,0] = prediction['image_id']
       box_predictions[ii,1:5] = prediction['bbox'][:4] 
       box_predictions[ii, 5:]= [float(prediction['score']), prediction['category_id']]
+      del prediction['bbox']
 
     #BBox
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
-    cocoDt = cocoGt.loadRes(new_preds, use_ext=use_ext)
+    cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=use_ext, num_threads=24)
-    cocoEval.params.imgIds = img_ids
+    cocoEval.params.imgIds = imgIds
     cocoEval.evaluate(dist=use_dist_coco_eval)
     cocoEval.accumulate()
     if(MPI_rank() == 0):
       cocoEval.summarize()
     
     #Segm
-    cocoDt = cocoGt.loadRes(new_preds, use_ext=use_ext)
-    cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=use_ext, num_threads=24)
-    cocoEval.params.imgIds = img_ids
+    cocoDt = cocoGt.loadRes(predictions, use_ext=use_ext)
+    cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=use_ext, num_threads=24)
+    cocoEval.params.imgIds = imgIds
     cocoEval.evaluate(dist=use_dist_coco_eval)
     cocoEval.accumulate()
     if(MPI_rank() == 0):
