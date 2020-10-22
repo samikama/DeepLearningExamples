@@ -87,6 +87,7 @@ import time
 import multiprocessing
 
 
+mp.set_start_method('spawn')
 
 def get_latest_checkpoint(q, checkpoint_dir, model):
     encountered_checkpoints = set() 

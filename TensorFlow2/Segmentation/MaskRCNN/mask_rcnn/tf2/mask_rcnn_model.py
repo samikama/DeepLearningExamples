@@ -26,7 +26,6 @@ import time
 import itertools
 import copy
 import numpy as np
-import multiprocessing
 from statistics import mean
 import threading
 from math import ceil
@@ -36,7 +35,7 @@ import os
 
 import multiprocessing as mp
 import queue
-mp.set_start_method('spawn')
+#mp.set_start_method('spawn')
 
 import h5py
 import tensorflow as tf
@@ -852,7 +851,7 @@ class SessionModel(object):
             config.graph_options.optimizer_options.global_jit_level = tf.compat.v1.OptimizerOptions.ON_1
         config.intra_op_parallelism_threads = 1  # Avoid pool of Eigen threads
         if MPI_is_distributed():
-            config.inter_op_parallelism_threads = max(2, multiprocessing.cpu_count() // hvd.local_size())
+            config.inter_op_parallelism_threads = max(2, mp.cpu_count() // hvd.local_size())
         elif not use_tf_distributed:
             config.inter_op_parallelism_threads = 4
         return config
