@@ -90,7 +90,16 @@ def define_hparams_flags():
             ' from input by setting `include_groundtruth_in_features`=True'
         )
     )
-    
+    flags.DEFINE_bool(
+        'use_default_roi_align',
+        default=True,
+        help='Use default ROIAlign implementation.'
+    )    
+    flags.DEFINE_bool(
+        'transposed_roi_align',
+        default=True,
+        help='Transpose ROI align. Default is NHWC'
+    )    
     flags.DEFINE_bool(
         'dist_eval',
         default=False,
