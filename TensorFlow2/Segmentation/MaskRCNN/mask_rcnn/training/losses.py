@@ -167,7 +167,7 @@ def _giou_loss(y_true, y_pred, weights, reduction='sum'):
     if reduction == 'sum':
         giou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(giou_loss), avg_factor)
     else:
-        giou_loss /= avg_factor
+        giou_loss = tf.math.divide_no_nan(giou_loss, avg_factor)
     assert giou_loss.dtype == tf.float32
     return giou_loss
 
@@ -255,12 +255,6 @@ def _huber_loss(y_true, y_pred, weights, delta, reduction=ReductionV2.SUM):
 def _sigmoid_cross_entropy(multi_class_labels, logits, weights, sum_by_non_zeros_weights=False, label_smoothing=0.0):
 
     assert weights.dtype == tf.float32
-
-#    sigmoid_cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(
-#        labels=multi_class_labels,
-#        logits=logits,
-#        name="x-entropy"
-#    )
 
     sigmoid_cross_entropy = tf.compat.v1.losses.sigmoid_cross_entropy(
         multi_class_labels=multi_class_labels,
@@ -549,6 +543,8 @@ def _fast_rcnn_box_carl_loss(box_outputs, box_targets, class_targets,
         loss_bbox = tf.reduce_sum(box_loss)
         regression_loss = loss_carl + loss_bbox
 
+        # tf.print(loss_carl, loss_bbox)
+        
         if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
             regression_loss /= normalizer
         return regression_loss
@@ -621,7 +617,7 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
 
 
         box_outputs = tf.reshape(box_outputs, [batch_size, -1, 4])
-        if not params['use_carl']:
+        if not params['use_carl_loss']:
             box_loss = _fast_rcnn_box_loss(
                 box_outputs=box_outputs,
                 box_targets=box_targets,
