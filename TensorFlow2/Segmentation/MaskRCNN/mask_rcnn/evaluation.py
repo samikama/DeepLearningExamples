@@ -673,6 +673,7 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
       box_predictions[ii, 5:]= [float(prediction['score']), prediction['category_id']]
       del prediction['bbox']
 
+    print(use_ext, use_dist_coco_eval)
     #BBox
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
     cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)
