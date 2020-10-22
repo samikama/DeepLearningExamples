@@ -87,7 +87,7 @@ import time
 import multiprocessing as mp
 
 
-mp.set_start_method('forkserver')
+
 
 def get_latest_checkpoint(q, checkpoint_dir, model):
     encountered_checkpoints = set() 
