@@ -34,10 +34,8 @@ def add_noise(image, std=0.05, seed=None):
 
 def normalize_image(image):
     """Normalize the image.
-
     Args:
     image: a tensor of shape [height, width, 3] in dtype=tf.float32.
-
     Returns:
     normalized_image: a tensor which has the same shape and dtype as image,
       with pixel values normalized.
@@ -53,9 +51,8 @@ def normalize_image(image):
     return normalized_image
 
 
-def random_horizontal_flip(image, boxes=None, masks=None, seed=None):
+def random_horizontal_flip(image, boxes=None, masks=None, precached_masks=None, seed=None):
     """Random horizontal flip the image, boxes, and masks.
-
     Args:
     image: a tensor of shape [height, width, 3] representing the image.
     boxes: (Optional) a tensor of shape [num_boxes, 4] represneting the box
@@ -63,21 +60,18 @@ def random_horizontal_flip(image, boxes=None, masks=None, seed=None):
     masks: (Optional) a tensor of shape [num_masks, height, width]
       representing the object masks. Note that the size of the mask is the
       same as the image.
-
     Returns:
     image: the processed image tensor after being randomly flipped.
     boxes: None or the processed box tensor after being randomly flipped.
     masks: None or the processed mask tensor after being randomly flipped.
     """
-    return preprocessor.random_horizontal_flip(image, boxes, masks, seed=seed)
+    return preprocessor.random_horizontal_flip(image, boxes, masks, precached_masks=precached_masks,seed=seed)
 
 
 def resize_and_pad(image, target_size, stride, boxes=None, masks=None):
     """Resize and pad images, boxes and masks.
-
     Resize and pad images, (optionally boxes and masks) given the desired output
     size of the image and stride size.
-
     Here are the preprocessing steps.
     1. For a given image, keep its aspect ratio and rescale the image to make it
      the largest rectangle to be bounded by the rectangle specified by the
@@ -85,7 +79,6 @@ def resize_and_pad(image, target_size, stride, boxes=None, masks=None):
     2. Pad the rescaled image such that the height and width of the image become
      the smallest multiple of the stride that is larger or equal to the desired
      output diemension.
-
     Args:
     image: an image tensor of shape [original_height, original_width, 3].
     target_size: a tuple of two integers indicating the desired output
@@ -97,7 +90,6 @@ def resize_and_pad(image, target_size, stride, boxes=None, masks=None):
     masks: (Optional) a tensor of shape [num_masks, height, width]
       representing the object masks. Note that the size of the mask is the
       same as the image.
-
     Returns:
     image: the processed image tensor after being resized and padded.
     image_info: a tensor of shape [5] which encodes the height, width before
@@ -193,12 +185,10 @@ def crop_gt_masks(instance_masks, boxes, gt_mask_size, image_size):
 
 def pad_to_fixed_size(data, pad_value, output_shape):
     """Pad data to a fixed length at the first dimension.
-
     Args:
     data: Tensor to be padded to output_shape.
     pad_value: A constant value assigned to the paddings.
     output_shape: The output shape of a 2D tensor.
-
     Returns:
     The Padded tensor with output_shape [max_num_instances, dimension].
     """

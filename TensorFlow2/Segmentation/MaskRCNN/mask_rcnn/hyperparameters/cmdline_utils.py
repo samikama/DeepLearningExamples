@@ -172,7 +172,11 @@ def define_hparams_flags():
         default=None,
         help='The directory where the model and training/evaluation summaries are stored.'
     )
-
+    flags.DEFINE_bool(
+        'preprocessed_data',
+        default=False,
+        help=('If set use precomputed masks.')
+    )
     flags.DEFINE_float("momentum", default=0.9, help="Optimizer Momentum")
     flags.DEFINE_float("beta1", default=0.9, help="novograd b1")
     flags.DEFINE_float("beta2", default=0.3, help="novograd b2")
@@ -234,7 +238,13 @@ def define_hparams_flags():
     )
 
     flags.DEFINE_bool('xla', default=False, help='Enable XLA JIT Compiler.')
-
+    
+    flags.DEFINE_bool(
+        'validate_preprocessed',
+        default=False,
+        help=('If set use precomputed masks.')
+    )
+    
     flags.DEFINE_string('training_file_pattern', default="", help='TFRecords file pattern for the training files')
 
     flags.DEFINE_string('validation_file_pattern', default="", help='TFRecords file pattern for the validation files')

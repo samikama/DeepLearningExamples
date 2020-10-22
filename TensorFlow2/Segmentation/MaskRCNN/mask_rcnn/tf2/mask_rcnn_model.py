@@ -54,7 +54,6 @@ from mask_rcnn.ops import training_ops
 
 from mask_rcnn.utils.logging_formatter import logging
 
-from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_local_rank, MPI_rank
 from mask_rcnn import evaluation, coco_metric
 
 from mask_rcnn.utils.meters import StandardMeter
@@ -71,8 +70,10 @@ from mask_rcnn.utils.herring_env import is_herring
 
 if is_herring():
     import herring.tensorflow as herring
+    from mask_rcnn.utils.distributed_utils_herring import MPI_is_distributed, MPI_local_rank, MPI_rank
 else:
     hvd = LazyImport("horovod.tensorflow")
+    from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_local_rank, MPI_rank
 
 MODELS = dict()
 
@@ -965,7 +966,7 @@ class TapeModel(object):
                     logging.info("Broadcasting optimizer")
                 herring.broadcast_variables(self.optimizer.variables(), 0)        
         else:
-            if MPI_is_distributed():
+            if MPI_is_distributed(False):
                 tape = hvd.DistributedGradientTape(tape, compression=hvd.compression.NoneCompressor)
             if self.params.amp:
                 scaled_gradients = tape.gradient(scaled_loss, self.forward.trainable_variables)
@@ -990,12 +991,12 @@ class TapeModel(object):
             # self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
             self.optimizer.apply_gradients(grads_and_vars)
 
-            if MPI_is_distributed() and sync_weights:
-                if MPI_rank()==0:
+            if MPI_is_distributed(False) and sync_weights:
+                if MPI_rank(False)==0:
                     logging.info("Broadcasting variables")
                 hvd.broadcast_variables(self.forward.variables, 0)
-            if MPI_is_distributed() and sync_opt:
-                if MPI_rank()==0:
+            if MPI_is_distributed(False) and sync_opt:
+                if MPI_rank(False)==0:
                     logging.info("Broadcasting optimizer")
                 hvd.broadcast_variables(self.optimizer.variables(), 0)
         return loss_dict
@@ -1005,40 +1006,73 @@ class TapeModel(object):
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
     
-    def train_epoch(self, steps, broadcast=False):
+    def train_epoch(self, steps, broadcast=False, profile=None):
         if MPI_rank(is_herring())==0:
             logging.info("Starting training loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             loss_history = []
         else:
             p_bar = range(steps)
+        times=[]
+        global st
+        if MPI_rank(is_herring())==0 and profile is not None:
+            logging.info(f"Saving profile to {profile}")
+            tf_profiler.start(profile)
+            for i in p_bar:
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                with prof_Trace(f"Step-",step_num=i,_r=1):
+                    tstart=time.perf_counter()
+                    features, labels = next(self.train_tdf)
+                    loss_dict = self.train_step(features, labels, b_w, b_o)
+                    times.append(time.perf_counter()-tstart)
+                if MPI_rank()==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
+            tf_profiler.stop()
+        else:
+            runtype="TrainStep"
+            for i in p_bar:
 
-        timings=[]
-        for i in p_bar:
-            if broadcast and i==0:
-                b_w, b_o = True, True
-            elif i==0:
-                b_w, b_o = False, True
-            else:
-                b_w, b_o = False, False
+                if i == 5 and self.epoch_num == 0:
+                    st = time.time()
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                tstart=time.perf_counter()
+                #step_token=nvtx.push(f"{runtype}-{i}",runtype)
+                features, labels = next(self.train_tdf)
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                loss_dict = self.train_step(features, labels, b_w, b_o)
+                times.append(time.perf_counter()-tstart)
+                #nvtx.pop(step_token)
+                if MPI_rank(is_herring())==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
             
-            tstart = time.perf_counter()
-            features, labels = next(self.train_tdf)
-            loss_dict = self.train_step(features, labels, b_w, b_o)
-
-            delta_t = time.perf_counter() - tstart
-            timings.append(delta_t)
-            if MPI_rank(is_herring())==0:
-                loss_history.append(loss_dict['total_loss'].numpy())
-                step = self.optimizer.iterations
-                learning_rate = self.schedule(step)
-                p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
-                                                                          learning_rate))
-            #if i%500 == 0:
-            #    timings = np.asarray(timings, np.float)
-            #    print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
-            #    timings = []
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[10:])*1000.} +/- {np.std(times[10:])*1000.} ms")
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[500:])*1000.} +/- {np.std(times[500:])*1000.} ms")
         if MPI_rank(is_herring()) == 0:
+            if self.epoch_num == 16:
+                print(f'Total time is {time.time() - st}')
+            #print(f'average step time={np.mean(timings[10:])} +/- {np.std(timings[10:])}')
             print("Saving checkpoint...")
             self.epoch_num+=1
             self.save_model()

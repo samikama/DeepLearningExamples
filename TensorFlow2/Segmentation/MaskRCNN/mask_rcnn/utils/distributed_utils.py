@@ -99,7 +99,6 @@ def mpi_env_MPI_rank_and_size():
     are returned. (This is appropriate because when you call MPI_Init in an
     application not started with mpirun, it will create a new independent
     communicator with only one process in it.)
-
     Source: https://github.com/horovod/horovod/blob/c3626e/test/common.py#L25
     """
     rank_env = 'PMI_RANK SLURM_PROCID OMPI_COMM_WORLD_RANK'.split()

@@ -29,9 +29,14 @@ import logging as _logging
 
 import warnings
 
-from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
 from mask_rcnn.utils.metaclasses import SingletonMetaClass
 from mask_rcnn.utils.herring_env import is_herring
+
+
+if is_herring():
+    from mask_rcnn.utils.distributed_utils_herring import MPI_rank_and_size
+else:
+    from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
 __all__ = [
     "logging",
     "log_cleaning"
@@ -316,10 +321,8 @@ class _Logger(object):
     def debug(self, msg, *args, **kwargs):
         """
         Log 'msg % args' with severity 'DEBUG'.
-
         To pass exception information, use the keyword argument exc_info with
         a true value, e.g.
-
         logger.debug("Houston, we have a %s", "thorny problem", exc_info=1)
         """
         if self._logger is not None and self._logger.isEnabledFor(_Logger.DEBUG):
@@ -328,10 +331,8 @@ class _Logger(object):
     def info(self, msg, *args, **kwargs):
         """
         Log 'msg % args' with severity 'INFO'.
-
         To pass exception information, use the keyword argument exc_info with
         a true value, e.g.
-
         logger.info("Houston, we have a %s", "interesting problem", exc_info=1)
         """
         if self._logger is not None and self._logger.isEnabledFor(_Logger.INFO):
@@ -340,10 +341,8 @@ class _Logger(object):
     def warning(self, msg, *args, **kwargs):
         """
         Log 'msg % args' with severity 'WARNING'.
-
         To pass exception information, use the keyword argument exc_info with
         a true value, e.g.
-
         logger.warning("Houston, we have a %s", "bit of a problem", exc_info=1)
         """
         if self._logger is not None and self._logger.isEnabledFor(_Logger.WARNING):
@@ -352,10 +351,8 @@ class _Logger(object):
     def error(self, msg, *args, **kwargs):
         """
         Log 'msg % args' with severity 'ERROR'.
-
         To pass exception information, use the keyword argument exc_info with
         a true value, e.g.
-
         logger.error("Houston, we have a %s", "major problem", exc_info=1)
         """
         if self._logger is not None and self._logger.isEnabledFor(_Logger.ERROR):
@@ -364,10 +361,8 @@ class _Logger(object):
     def critical(self, msg, *args, **kwargs):
         """
         Log 'msg % args' with severity 'CRITICAL'.
-
         To pass exception information, use the keyword argument exc_info with
         a true value, e.g.
-
         logger.critical("Houston, we have a %s", "major disaster", exc_info=1)
         """
         if self._logger is not None and self._logger.isEnabledFor(_Logger.CRITICAL):
