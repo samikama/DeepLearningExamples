@@ -84,7 +84,7 @@ from mask_rcnn.utils import coco_utils
 
 import h5py
 import time
-import multiprocessing
+import multiprocessing as mp
 
 
 mp.set_start_method('spawn')
