@@ -109,9 +109,16 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
     args=[q, out_path, mrcnn_model]
     eval_workers=min(32, MPI_size())
     steps = run_config.eval_samples//eval_workers//run_config.eval_batch_size
-    batches = [next(mrcnn_model.eval_tdf)['features'] for i in range(steps)]
+    batches = []
+    while 1:
+      try:
+        batches.append(next(mrcnn_model.eval_tdf)['features'])
+      except Exception as e:
+        #Should only break when out of data
+        break
+    
     mrcnn_model.initialize_eval_model(batches[0])
-
+   
     #if MPI_rank() == 0:
     chkpoint_thread = threading.Thread(target=get_latest_checkpoint, name="checkpoint thread", args=args)
     chkpoint_thread.start()

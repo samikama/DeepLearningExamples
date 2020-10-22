@@ -186,11 +186,17 @@ class InputReader(object):
             map_func=self._create_dataset_parser_fn(params),
             num_parallel_calls=tf.data.experimental.AUTOTUNE,
         )
+        if do_dist_eval and (self._mode == tf.estimator.ModeKeys.PREDICT or self._mode == tf.estimator.ModeKeys.EVAL):
+          dataset = dataset.batch(
+              batch_size=batch_size,
+              drop_remainder=False
+          )
+        else:
+          dataset = dataset.batch(
+              batch_size=batch_size,
+              drop_remainder=True
+          )
 
-        dataset = dataset.batch(
-            batch_size=batch_size,
-            drop_remainder=True
-        )
 
         if self._use_fake_data:
             # Turn this dataset into a semi-fake dataset which always loop at the

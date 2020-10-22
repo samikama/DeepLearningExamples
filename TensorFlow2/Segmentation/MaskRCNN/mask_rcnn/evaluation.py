@@ -663,6 +663,9 @@ def coco_mask_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     print(f"Prepocessing mask {preproc_end - start} coco c++ ext {time.time() - preproc_end}")
 
 def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
+    # import pickle
+    # with open("/tmp/coco_data", 'wb') as fp:
+    #   obj = pickle.dump(predictions, fp)
 
     imgIds = []
     box_predictions = np.empty((len(predictions), 7))
@@ -673,7 +676,8 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
       box_predictions[ii, 5:]= [float(prediction['score']), prediction['category_id']]
       del prediction['bbox']
 
-    print(use_ext, use_dist_coco_eval)
+    imgIds = list(set(imgIds))
+    print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions))
     #BBox
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
     cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)

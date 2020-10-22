@@ -868,7 +868,7 @@ class TapeModel(object):
         self.train_tdf = iter(train_input_fn(train_params)) \
                             if train_input_fn else None
         eval_params = dict(self.params.values(), batch_size=self.params.eval_batch_size)
-        self.eval_tdf = iter(eval_input_fn(eval_params).repeat()) \
+        self.eval_tdf = iter(eval_input_fn(eval_params)) \
                             if eval_input_fn else None
         self.optimizer, self.schedule = self.get_optimizer()
         self.epoch_num = 0
