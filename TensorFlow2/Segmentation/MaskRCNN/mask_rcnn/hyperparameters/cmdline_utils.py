@@ -96,6 +96,11 @@ def define_hparams_flags():
         help='Use default ROIAlign implementation.'
     )    
     flags.DEFINE_bool(
+        'transposed_roi_align',
+        default=True,
+        help='Transpose ROI align. Default is NHWC'
+    )    
+    flags.DEFINE_bool(
         'dist_eval',
         default=False,
         help=('If set then distribute evaluation amongst all workers'

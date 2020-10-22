@@ -306,7 +306,6 @@ class MRCNN(tf.keras.Model):
                 bg_thresh_lo=params['bg_thresh_lo']
             )
         
-        is_mlcar_transposed=False
         # Performs multi-level RoIAlign.
         if params["use_default_roi_align"]:
             box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
@@ -322,7 +321,7 @@ class MRCNN(tf.keras.Model):
             boxes=rpn_box_rois_0,
             output_size=7,
             is_gpu_inference=is_gpu_inference,
-            is_transposed=is_mlcar_transposed
+            is_transposed=params['transpose_roi_align']
         )
         
         class_outputs, box_outputs, _ = self.box_head(inputs=box_roi_features)
@@ -411,7 +410,7 @@ class MRCNN(tf.keras.Model):
                 boxes=selected_box_rois_0,
                 output_size=14,
                 is_gpu_inference=is_gpu_inference,
-                is_transposed=is_mlcar_transposed
+                is_transposed=params['transposed_roi_align']
             )
         
         mask_outputs = self.mask_head(inputs=mask_roi_features, class_indices=class_indices)
