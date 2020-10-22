@@ -344,7 +344,10 @@ class MRCNN(tf.keras.Model):
                                   'box_outputs': box_outputs,
                                   'anchor_boxes': rpn_box_rois})
         else:  # is training
-            if params['box_loss_type'] != "giou":
+            def is_iou_based_loss(loss_type):
+                return loss_type in ["giou", "diou", "ciou", "iou"]
+
+            if not is_iou_based_loss(params['box_loss_type']):
                 encoded_box_targets = training_ops.encode_box_targets(
                     boxes=rpn_box_rois,
                     gt_boxes=box_targets,
@@ -358,7 +361,7 @@ class MRCNN(tf.keras.Model):
                 'class_outputs': class_outputs,
                 'box_outputs': box_outputs,
                 'class_targets': class_targets,
-                'box_targets': encoded_box_targets if params['box_loss_type'] != 'giou' else box_targets,
+                'box_targets': box_targets if is_iou_based_loss(params['box_loss_type']) else encoded_box_targets,
                 'box_rois': rpn_box_rois,
             })
         # Faster-RCNN mode.
