@@ -57,11 +57,7 @@ else:
 from mask_rcnn.utils.logging_formatter import logging
 
 from mask_rcnn import dataloader
-#from mask_rcnn import distributed_executer
-#from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
 from mask_rcnn.tf2 import mask_rcnn_model as mask_rcnn_model_v2
-#from mask_rcnn import session_executor
-from mask_rcnn import tape_executor
 
 from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn.hyperparameters import params_io
@@ -69,12 +65,14 @@ from mask_rcnn.hyperparameters import params_io
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
 
 from mask_rcnn.utils.logging_formatter import log_cleaning
-import dllogger
+#import dllogger
 
 FLAGS = define_hparams_flags()
 
 def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
     """Runs Mask RCNN model on distribution strategy defined by the user."""
+    from mask_rcnn import distributed_executer
+    from mask_rcnn import mask_rcnn_model as mask_rcnn_model_v1
     mask_rcnn_model = mask_rcnn_model_v2 if runtime_config.tf2 else mask_rcnn_model_v1
     if runtime_config.use_tf_distributed:
         executer = distributed_executer.TFDistributedExecuter(runtime_config, mask_rcnn_model.mask_rcnn_model_fn)
@@ -98,9 +96,11 @@ def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
         raise ValueError('Mode must be one of `train`, `eval`, or `train_and_eval`')
         
 def run_session(runtime_config, train_input_fn, eval_input_fn):
+    from mask_rcnn import session_executor
     session_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
 
 def run_tape(runtime_config, train_input_fn, eval_input_fn):
+    from mask_rcnn import tape_executor
     tape_executor.train_and_eval(runtime_config, train_input_fn, eval_input_fn)
 
 def main(argv):
@@ -146,8 +146,8 @@ def main(argv):
         if not RUN_CONFIG.include_groundtruth_in_features and not os.path.isfile(RUN_CONFIG.val_json_file):
             raise FileNotFoundError("Validation JSON File not found: %s" % RUN_CONFIG.val_json_file)
 
-    dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
-                                                           filename=RUN_CONFIG.log_path)])
+    #dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
+    #                                                       filename=RUN_CONFIG.log_path)])
 
     if RUN_CONFIG.mode in ('train', 'train_and_eval'):
         

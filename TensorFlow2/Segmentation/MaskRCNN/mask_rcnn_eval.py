@@ -47,7 +47,7 @@ from mask_rcnn.tf2.mask_rcnn_model import TapeModel
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
 
 from mask_rcnn.utils.logging_formatter import log_cleaning
-import dllogger
+#import dllogger
 
 FLAGS = define_hparams_flags()
 

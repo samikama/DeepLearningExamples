@@ -48,7 +48,7 @@ from mask_rcnn.tf2.mask_rcnn_model import TapeModel
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
 
 from mask_rcnn.utils.logging_formatter import log_cleaning
-import dllogger
+#import dllogger
 
 FLAGS = define_hparams_flags()
 
@@ -133,8 +133,8 @@ def main(argv):
         if not RUN_CONFIG.include_groundtruth_in_features and not os.path.isfile(RUN_CONFIG.val_json_file):
             raise FileNotFoundError("Validation JSON File not found: %s" % RUN_CONFIG.val_json_file)
 
-    dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
-                                                           filename=RUN_CONFIG.log_path)])
+    # dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
+    #                                                        filename=RUN_CONFIG.log_path)])
 
     eval_input_fn = dataloader.InputReader(
         file_pattern=RUN_CONFIG.validation_file_pattern,

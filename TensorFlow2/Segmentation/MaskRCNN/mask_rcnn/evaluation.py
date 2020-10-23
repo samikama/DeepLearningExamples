@@ -47,8 +47,8 @@ from mask_rcnn.utils import coco_utils
 from mask_rcnn.object_detection import visualization_utils
 from mask_rcnn.utils.distributed_utils import MPI_rank
 
-import dllogger
-from dllogger import Verbosity
+# import dllogger
+# from dllogger import Verbosity
 
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
@@ -288,10 +288,10 @@ def compute_coco_eval_metric_1(predictor,
             seconds=int(total_processing_seconds)
         )
     )
-    dllogger.log(step=(), data={"avg_inference_throughput": avg_throughput}, verbosity=Verbosity.DEFAULT)
+    # dllogger.log(step=(), data={"avg_inference_throughput": avg_throughput}, verbosity=Verbosity.DEFAULT)
     avg_inference_time = float(total_processing_hours * 3600 + int(total_processing_minutes) * 60 +
         int(total_processing_seconds))
-    dllogger.log(step=(), data={"avg_inference_time": avg_inference_time}, verbosity=Verbosity.DEFAULT)
+    # dllogger.log(step=(), data={"avg_inference_time": avg_inference_time}, verbosity=Verbosity.DEFAULT)
     logging.info("==================== Metrics ====================")
 
     # logging.info('Eval Epoch results: %s' % pprint.pformat(eval_results, indent=4))
