@@ -1145,8 +1145,10 @@ class TapeModel(object):
         stop_event.clear()
         post_proc = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
         post_proc2 = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
+        post_proc3 = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
         post_proc.start()
         post_proc2.start()
+        post_proc3.start()
 
         #if MPI_rank(is_herring())==0:
         #  tf.profiler.experimental.start('logdir')
@@ -1165,9 +1167,10 @@ class TapeModel(object):
             in_q.put(out, False)
         stop_event.set()
         #Should expect num threads items in queue
-        converted_predictions = out_q.get() + out_q.get()
+        converted_predictions = out_q.get() + out_q.get() + out_q.get()
         post_proc.join()
         post_proc2.join()
+        post_proc3.join()
 
         #if MPI_rank(is_herring())==0:
         #  tf.profiler.experimental.stop()
@@ -1209,8 +1212,8 @@ class TapeModel(object):
           evaluation.fast_eval(converted_predictions, validation_json_file, use_ext, use_dist_coco_eval)
 
         end_coco_eval = time.time()
-        print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
-        print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
+        #print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
+        #print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
 
 #@profile_dec
 def coco_pre_process(in_q, out_q, finish_input):
@@ -1257,8 +1260,6 @@ def coco_pre_process(in_q, out_q, finish_input):
           converted_predictions += coco.load_predictions(worker_predictions, include_mask=True, is_image_mask=False)
           end_coco_load = time.time()
           total_preproc += end_coco_load - start
-        else:
-          time.sleep(.05)
       out_q.put(converted_predictions)
-      print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
+      #print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
       return

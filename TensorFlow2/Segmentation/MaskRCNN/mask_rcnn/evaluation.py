@@ -679,7 +679,8 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
 
     imgIds = list(set(imgIds))
     catIds = list(set(catIds))
-    print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions), len(catIds))
+    #print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions), len(catIds))
+    
     #BBox
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
     cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)
@@ -687,23 +688,17 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     cocoEval.params.imgIds = imgIds
     cocoEval.evaluate(dist=use_dist_coco_eval)
     cocoEval.accumulate()
-    if(MPI_rank() == 0):
-      cocoEval.summarize()
-      print(cocoEval.eval['precision'].shape)
-      print(cocoEval.eval['recall'].shape)
-      print(cocoEval.eval['scores'].shape)
     
     #Segm
-    cocoDt = cocoGt.loadRes(predictions, use_ext=use_ext)
-    cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=use_ext, num_threads=24)
-    cocoEval.params.imgIds = imgIds
-    cocoEval.evaluate(dist=use_dist_coco_eval)
-    cocoEval.accumulate()
+    scocoDt = cocoGt.loadRes(predictions, use_ext=use_ext)
+    scocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=use_ext, num_threads=24)
+    scocoEval.params.imgIds = imgIds
+    scocoEval.evaluate(dist=use_dist_coco_eval)
+    scocoEval.accumulate()
     if(MPI_rank() == 0):
       cocoEval.summarize()
-      print(cocoEval.eval['precision'].shape)
-      print(cocoEval.eval['recall'].shape)
-      print(cocoEval.eval['scores'].shape)
+      scocoEval.summarize()
+      
     
     return
 
