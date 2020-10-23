@@ -118,7 +118,6 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
         break
     steps = len(batches)
     print(steps)
-    exit(1)
     
     mrcnn_model.initialize_eval_model(batches[0])
    
