@@ -108,7 +108,6 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
     out_path = run_config.model_dir
     args=[q, out_path, mrcnn_model]
     eval_workers=min(32, MPI_size())
-    steps = run_config.eval_samples//eval_workers//run_config.eval_batch_size
     batches = []
     while 1:
       try:
@@ -116,6 +115,7 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
       except Exception as e:
         #Should only break when out of data
         break
+    steps = len(batches)
     
     mrcnn_model.initialize_eval_model(batches[0])
    
