@@ -94,9 +94,6 @@ def process_prediction_for_eval_batch(prediction):
     box_coordinates = prediction['detection_boxes']
     processed_box_coordinates = np.zeros_like(box_coordinates)
     
-    if(MPI_rank() == 0):
-      print("Box Coordinates ", box_coordinates.shape)
-
     for image_id in range(box_coordinates.shape[0]):
         scale = image_info[image_id][2]
         processed_box_coordinates[image_id, :] = np.concatenate((box_coordinates[image_id, :, 1][..., np.newaxis], box_coordinates[image_id, :, 0][..., np.newaxis], 
