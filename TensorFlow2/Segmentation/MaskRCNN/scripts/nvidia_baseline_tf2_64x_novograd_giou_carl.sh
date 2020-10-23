@@ -18,15 +18,23 @@ WITH_XLA=${WITH_XLA:-1}
 BATCH_SIZE=1
 HOST_COUNT=1
 NUM_GPUS=8
-PRECALC_DATASET=${PRECALC_DATASET:-1}
+#PRECALC_DATASET=1
+PRECALC_DATASET=0
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../results_tf2_64x_novo_$1
-mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
- 
-
-/shared/rejin/conda/bin/herringrun -n 64 -c /shared/rejin/conda \
-    RUN_HERRING=1 \
+rm -rf $BASEDIR/../results_tf2_64x_novo_carl_$1
+mkdir -p $BASEDIR/../results_tf2_64x_novo_carl_$1
+/opt/amazon/openmpi/bin/mpirun --tag-output --mca plm_rsh_no_tree_spawn 1 \
+    --mca btl_tcp_if_exclude lo,docker0 \
+    --hostfile /shared/rejin/hosts_64x \
+    -N 8 \
+    -x NCCL_DEBUG=VERSION \
+    -x LD_LIBRARY_PATH \
+    -x PATH \
+    -x FI_PROVIDER="efa" \
+    --oversubscribe \
+    --bind-to none \
+    bash launcher.sh \
     /shared/rejin/conda/bin/python  ${BASEDIR}/bind_launch.py  --direct_launch=${DIRECT_LAUNCH} --nproc_per_node=${NUM_GPUS} --nsockets_per_node=2 --ncores_per_socket=24 ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
 	--loop_mode="tape" \
@@ -37,7 +45,7 @@ mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
         --init_learning_rate=0.07 \
         --optimizer_type="Novograd" \
         --lr_schedule="cosine" \
-        --model_dir="$BASEDIR/../results_tf2_64x_novo_$1" \
+        --model_dir="$BASEDIR/../results_tf2_64x_novo_carl_$1" \
         --num_steps_per_eval=231 \
         --warmup_learning_rate=0.000133 \
 	--beta1=0.9 \
@@ -49,14 +57,15 @@ mkdir -p $BASEDIR/../results_tf2_64x_novo_$1
         --train_batch_size=1 \
         --eval_batch_size=1 \
         --dist_eval \
-	--first_eval=22 \
-	--use_carl_loss \
-        --training_file_pattern="/scratch/precalc_masks_latest/train*.tfrecord" \
+	--first_eval=15 \
+        --training_file_pattern="/shared/data2/train*.tfrecord" \
         --validation_file_pattern="/shared/data2/val*.tfrecord" \
         --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
-        --xla \
         --tf2 \
+	--xla \
+	--use_carl_loss \
 	--preprocessed_data=${PRECALC_DATASET} \
-        --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_64x_novo_$1/train_eval.log
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_64x_novo_carl_$1/train_eval.log
+

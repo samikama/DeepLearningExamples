@@ -1086,13 +1086,13 @@ class TapeModel(object):
                 else:
                     b_w, b_o = False, False
                 tstart=time.perf_counter()
-                step_token=nvtx.push(f"{runtype}-{i}",runtype)
+                #step_token=nvtx.push(f"{runtype}-{i}",runtype)
                 features, labels = next(self.train_tdf)
                 b_w = tf.convert_to_tensor(b_w)
                 b_o = tf.convert_to_tensor(b_o)
                 loss_dict = self.train_step(features, labels, b_w, b_o)
                 times.append(time.perf_counter()-tstart)
-                nvtx.pop(step_token)
+                #nvtx.pop(step_token)
                 if MPI_rank(is_herring())==0:
                     loss_history.append(loss_dict['total_loss'].numpy())
                     step = self.optimizer.iterations
