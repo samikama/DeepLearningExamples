@@ -531,7 +531,9 @@ def _fast_rcnn_box_carl_loss(box_outputs, box_targets, class_targets,
         top_class_score = class_scores * oh_targets
         pos_cls_score = top_class_score[:,:,1:] # ignore GT score
         pos_cls_score = tf.reduce_max(pos_cls_score, axis=-1)
-        carl_loss_weights = tf.pow(beta + (1. - beta) * pos_cls_score, gamma)
+        # carl_loss_weights = tf.pow(beta + (1. - beta) * pos_cls_score, gamma)
+        # since gamma is 1.0 right now just use the linear combination term
+        carl_loss_weights = beta + (1. - beta) * pos_cls_score
         # zero out bias contributions from zero pos_cls_scores (GTs)
         carl_loss_weights = tf.where(pos_cls_score > 0.0, carl_loss_weights, tf.zeros_like(carl_loss_weights))
         # normalize carl_loss_weight to make its sum equal to num positive
@@ -541,10 +543,11 @@ def _fast_rcnn_box_carl_loss(box_outputs, box_targets, class_targets,
 
         loss_carl = tf.reduce_sum(box_loss * tf.expand_dims(carl_loss_weights, -1))
         loss_bbox = tf.reduce_sum(box_loss)
+
+        assert loss_carl.dtype == tf.float32
+
         regression_loss = loss_carl + loss_bbox
 
-        # tf.print(loss_carl, loss_bbox)
-        
         if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
             regression_loss /= normalizer
         return regression_loss
