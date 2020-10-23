@@ -680,7 +680,7 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     imgIds = list(set(imgIds))
     catIds = list(set(catIds))
     #print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions), len(catIds))
-    
+
     #BBox
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
     cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)
@@ -696,7 +696,9 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     scocoEval.evaluate(dist=use_dist_coco_eval)
     scocoEval.accumulate()
     if(MPI_rank() == 0):
+      logging.info("Bbox Summary")
       cocoEval.summarize()
+      logging.info("Segm Summary")
       scocoEval.summarize()
       
     
