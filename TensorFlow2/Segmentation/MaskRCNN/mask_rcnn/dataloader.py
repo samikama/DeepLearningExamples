@@ -16,11 +16,9 @@
 # limitations under the License.
 
 """Data loader and processing.
-
 Defines input_fn of Mask-RCNN for TF Estimator. The input_fn includes training
 data for category classification, bounding box regression, and number of
 positive examples to normalize the loss during training.
-
 """
 import functools
 import math
@@ -263,7 +261,6 @@ class InputReader(object):
 if __name__ == "__main__":
     '''
     Data Loading Benchmark Usage:
-
     # Real Data - Training
     python -m mask_rcnn.dataloader \
         --data_dir="/data/" \
@@ -271,16 +268,13 @@ if __name__ == "__main__":
         --warmup_steps=200 \
         --benchmark_steps=2000 \
         --training
-
     # Real Data - Inference
     python -m mask_rcnn.dataloader \
         --data_dir="/data/" \
         --batch_size=8 \
         --warmup_steps=200 \
         --benchmark_steps=2000
-
     # --------------- #
-
     # Synthetic Data - Training
     python -m mask_rcnn.dataloader \
         --data_dir="/data/" \
@@ -289,7 +283,6 @@ if __name__ == "__main__":
         --benchmark_steps=2000 \
         --training \
         --use_synthetic_data
-
     # Synthetic Data - Inference
     python -m mask_rcnn.dataloader \
         --data_dir="/data/" \
@@ -297,7 +290,6 @@ if __name__ == "__main__":
         --warmup_steps=200 \
         --benchmark_steps=2000 \
         --use_synthetic_data
-
     # --------------- #
     '''
 

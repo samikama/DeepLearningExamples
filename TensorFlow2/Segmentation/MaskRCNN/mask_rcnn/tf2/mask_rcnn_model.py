@@ -75,6 +75,20 @@ else:
     hvd = LazyImport("horovod.tensorflow")
     from mask_rcnn.utils.distributed_utils import MPI_is_distributed, MPI_local_rank, MPI_rank
 
+from tensorflow.python.profiler import profiler_v2 as tf_profiler
+from tensorflow.python.profiler.trace import Trace as prof_Trace
+try:
+    from tensorflow.python import _pywrap_nvtx as nvtx
+except ImportError:
+    class DummyNvtx:
+        def __init__(self):
+            pass
+        def push(self,a=None,b=None):
+            pass
+        def pop(self,a=None):
+            pass
+    nvtx=DummyNvtx()
+
 MODELS = dict()
 
 
@@ -305,13 +319,23 @@ class MRCNN(tf.keras.Model):
                 bg_thresh_hi=params['bg_thresh_hi'],
                 bg_thresh_lo=params['bg_thresh_lo']
             )
-
+        
         # Performs multi-level RoIAlign.
-        box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
-            features=fpn_feats,
-            boxes=rpn_box_rois,
+        if params["use_default_roi_align"]:
+            box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+                features=fpn_feats,
+                boxes=rpn_box_rois,
+                output_size=7,
+                is_gpu_inference=is_gpu_inference
+            )
+        else:
+
+            box_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
+            features=fpn_feats_0,
+            boxes=rpn_box_rois_0,
             output_size=7,
-            is_gpu_inference=is_gpu_inference
+            is_gpu_inference=is_gpu_inference,
+            is_transposed=params['transpose_roi_align']
         )
         
         class_outputs, box_outputs, _ = self.box_head(inputs=box_roi_features)
@@ -387,12 +411,21 @@ class MRCNN(tf.keras.Model):
 
             class_indices = tf.cast(selected_class_targets, dtype=tf.int32)
 
-        mask_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
-            features=fpn_feats,
-            boxes=selected_box_rois,
-            output_size=14,
-            is_gpu_inference=is_gpu_inference
-        )
+        if params["use_default_roi_align"]:
+            mask_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+                features=fpn_feats,
+                boxes=selected_box_rois,
+                output_size=14,
+                is_gpu_inference=is_gpu_inference
+            )
+        else:
+            mask_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
+                features=fpn_feats_0,
+                boxes=selected_box_rois_0,
+                output_size=14,
+                is_gpu_inference=is_gpu_inference,
+                is_transposed=params['transposed_roi_align']
+            )
         
         mask_outputs = self.mask_head(inputs=mask_roi_features, class_indices=class_indices)
 
@@ -1006,40 +1039,73 @@ class TapeModel(object):
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
     
-    def train_epoch(self, steps, broadcast=False):
+    def train_epoch(self, steps, broadcast=False, profile=None):
         if MPI_rank(is_herring())==0:
             logging.info("Starting training loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             loss_history = []
         else:
             p_bar = range(steps)
+        times=[]
+        global st
+        if MPI_rank(is_herring())==0 and profile is not None:
+            logging.info(f"Saving profile to {profile}")
+            tf_profiler.start(profile)
+            for i in p_bar:
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                with prof_Trace(f"Step-",step_num=i,_r=1):
+                    tstart=time.perf_counter()
+                    features, labels = next(self.train_tdf)
+                    loss_dict = self.train_step(features, labels, b_w, b_o)
+                    times.append(time.perf_counter()-tstart)
+                if MPI_rank()==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
+            tf_profiler.stop()
+        else:
+            runtype="TrainStep"
+            for i in p_bar:
 
-        timings=[]
-        for i in p_bar:
-            if broadcast and i==0:
-                b_w, b_o = True, True
-            elif i==0:
-                b_w, b_o = False, True
-            else:
-                b_w, b_o = False, False
+                if i == 5 and self.epoch_num == 0:
+                    st = time.time()
+                if broadcast and i==0:
+                    b_w, b_o = True, True
+                elif i==0:
+                    b_w, b_o = False, True
+                else:
+                    b_w, b_o = False, False
+                tstart=time.perf_counter()
+                #step_token=nvtx.push(f"{runtype}-{i}",runtype)
+                features, labels = next(self.train_tdf)
+                b_w = tf.convert_to_tensor(b_w)
+                b_o = tf.convert_to_tensor(b_o)
+                loss_dict = self.train_step(features, labels, b_w, b_o)
+                times.append(time.perf_counter()-tstart)
+                #nvtx.pop(step_token)
+                if MPI_rank(is_herring())==0:
+                    loss_history.append(loss_dict['total_loss'].numpy())
+                    step = self.optimizer.iterations
+                    learning_rate = self.schedule(step)
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                                                                            learning_rate))
             
-            tstart = time.perf_counter()
-            features, labels = next(self.train_tdf)
-            loss_dict = self.train_step(features, labels, b_w, b_o)
-
-            delta_t = time.perf_counter() - tstart
-            timings.append(delta_t)
-            if MPI_rank(is_herring())==0:
-                loss_history.append(loss_dict['total_loss'].numpy())
-                step = self.optimizer.iterations
-                learning_rate = self.schedule(step)
-                p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
-                                                                          learning_rate))
-            #if i%500 == 0:
-            #    timings = np.asarray(timings, np.float)
-            #    print(f"average step time={np.mean(timings)} +/- {np.std(timings)}")
-            #    timings = []
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[10:])*1000.} +/- {np.std(times[10:])*1000.} ms")
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[500:])*1000.} +/- {np.std(times[500:])*1000.} ms")
         if MPI_rank(is_herring()) == 0:
+            if self.epoch_num == 16:
+                print(f'Total time is {time.time() - st}')
+            #print(f'average step time={np.mean(timings[10:])} +/- {np.std(timings[10:])}')
             print("Saving checkpoint...")
             self.epoch_num+=1
             self.save_model()

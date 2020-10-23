@@ -153,7 +153,7 @@ def _calculate_ciou(b1, b2, mode="diou"):
 
 
 
-def _giou_loss(y_true, y_pred, weights):
+def _giou_loss(y_true, y_pred, weights, reduction='sum'):
     y_pred = tf.cast(y_pred, tf.float32)
     y_true = tf.cast(y_true, y_pred.dtype)
     weights = tf.cast(weights, tf.float32)
@@ -163,7 +163,11 @@ def _giou_loss(y_true, y_pred, weights):
     giou = _calculate_giou(y_true, y_pred)
     giou_loss = 1. - giou
     giou_loss = tf.tile(tf.expand_dims(giou_loss, -1), [1, 4]) * weights # only take pos example contributions
-    giou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(giou_loss), tf.math.count_nonzero(weights, dtype=tf.float32))
+    avg_factor = tf.math.count_nonzero(weights, dtype=tf.float32)
+    if reduction == 'sum':
+        giou_loss = tf.math.divide_no_nan(tf.math.reduce_sum(giou_loss), avg_factor)
+    else:
+        giou_loss = tf.math.divide_no_nan(giou_loss, avg_factor)
     assert giou_loss.dtype == tf.float32
     return giou_loss
 
@@ -205,13 +209,13 @@ def _l1_loss(y_true, y_pred, weights, delta=0.0):
     return l1_loss
 
 
-def _huber_loss(y_true, y_pred, weights, delta):
+def _huber_loss(y_true, y_pred, weights, delta, reduction=ReductionV2.SUM):
 
     num_non_zeros = tf.math.count_nonzero(weights, dtype=tf.float32)
 
     huber_keras_loss = tf.keras.losses.Huber(
         delta=delta,
-        reduction=ReductionV2.SUM,
+        reduction=reduction,
         name='huber_loss'
     )
 
@@ -251,12 +255,6 @@ def _huber_loss(y_true, y_pred, weights, delta):
 def _sigmoid_cross_entropy(multi_class_labels, logits, weights, sum_by_non_zeros_weights=False, label_smoothing=0.0):
 
     assert weights.dtype == tf.float32
-
-#    sigmoid_cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(
-#        labels=multi_class_labels,
-#        logits=logits,
-#        name="x-entropy"
-#    )
 
     sigmoid_cross_entropy = tf.compat.v1.losses.sigmoid_cross_entropy(
         multi_class_labels=multi_class_labels,
@@ -401,7 +399,6 @@ def _rpn_box_loss(box_outputs, box_targets, normalizer=1.0, delta=1. / 9):
         # The loss is normalized by the sum of non-zero weights before additional
         # normalizer provided by the function caller.
         box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
-        # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
         
         assert box_loss.dtype == tf.float32
 
@@ -415,7 +412,6 @@ def _rpn_box_loss(box_outputs, box_targets, normalizer=1.0, delta=1. / 9):
 
 def rpn_loss(score_outputs, box_outputs, labels, params):
     """Computes total RPN detection loss.
-
     Computes total RPN detection loss including box and score from all levels.
     Args:
     score_outputs: an OrderDict with keys representing levels and values
@@ -502,16 +498,63 @@ def _fast_rcnn_box_loss(box_outputs, box_targets, class_targets, loss_type='hube
         else:
             # box_loss = _l1_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta)
             raise NotImplementedError
-        
         if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
             box_loss /= normalizer
 
     return box_loss
 
 
+
+def _fast_rcnn_box_carl_loss(box_outputs, box_targets, class_targets,
+            class_outputs, beta=0.2, gamma=1.0, num_classes=91,
+            loss_type='huber', normalizer=1.0, delta=1.):
+    """Computes classification aware box regression loss."""
+
+    with tf.name_scope('fast_rcnn_carl_loss'):
+        mask = tf.tile(tf.expand_dims(tf.greater(class_targets, 0), axis=2), [1, 1, 4])
+
+        # The loss is normalized by the sum of non-zero weights before additional
+        # normalizer provided by the function caller.
+        if loss_type == 'huber':
+            box_loss = _huber_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, delta=delta, reduction=ReductionV2.NONE)
+        elif loss_type == 'giou':
+            box_loss = _giou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask, reduction='none')
+            box_loss = tf.reshape(box_loss, [-1, 512, 4]) # FIXME
+        elif loss_type == 'ciou':
+            box_loss = _ciou_loss(y_true=box_targets, y_pred=box_outputs, weights=mask)
+        else:
+            raise NotImplementedError
+
+        oh_targets = tf.one_hot(class_targets, depth=num_classes)
+        class_scores = tf.nn.softmax(class_outputs, axis=-1)
+        top_class_score = class_scores * oh_targets
+        pos_cls_score = top_class_score[:,:,1:] # ignore GT score
+        pos_cls_score = tf.reduce_max(pos_cls_score, axis=-1)
+        # carl_loss_weights = tf.pow(beta + (1. - beta) * pos_cls_score, gamma)
+        # since gamma is 1.0 right now just use the linear combination term
+        carl_loss_weights = beta + (1. - beta) * pos_cls_score
+        # zero out bias contributions from zero pos_cls_scores (GTs)
+        carl_loss_weights = tf.where(pos_cls_score > 0.0, carl_loss_weights, tf.zeros_like(carl_loss_weights))
+        # normalize carl_loss_weight to make its sum equal to num positive
+        num_pos = tf.math.count_nonzero(class_targets, dtype=carl_loss_weights.dtype)
+        weight_ratio = tf.math.divide_no_nan(num_pos, tf.reduce_sum(carl_loss_weights))
+        carl_loss_weights *= weight_ratio
+
+        loss_carl = tf.reduce_sum(box_loss * tf.expand_dims(carl_loss_weights, -1))
+        loss_bbox = tf.reduce_sum(box_loss)
+
+        assert loss_carl.dtype == tf.float32
+
+        regression_loss = loss_carl + loss_bbox
+
+        if isinstance(normalizer, tf.Tensor) or normalizer != 1.0:
+            regression_loss /= normalizer
+        return regression_loss
+
+
+
 def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_box_rois, image_info, params):
     """Computes the box and class loss (Fast-RCNN branch) of Mask-RCNN.
-
     This function implements the classification and box regression loss of the
     Fast-RCNN branch in Mask-RCNN. As the `box_outputs` produces `num_classes`
     boxes for each RoI, the reference model expands `box_targets` to match the
@@ -519,12 +562,9 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
     overlap. (Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/roi_data/fast_rcnn.py)
     Instead, this function selects the `box_outputs` by the `class_targets` so
     that it doesn't expand `box_targets`.
-
     The loss computation has two parts: (1) classification loss is softmax on all
     RoIs. (2) box loss is smooth L1-loss on only positive samples of RoIs.
     Reference: https://github.com/facebookresearch/Detectron/blob/master/detectron/modeling/fast_rcnn_heads.py
-
-
     Args:
     class_outputs: a float tensor representing the class prediction for each box
       with a shape of [batch_size, num_boxes, num_classes].
@@ -575,13 +615,24 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
 
 
         box_outputs = tf.reshape(box_outputs, [batch_size, -1, 4])
-        box_loss = _fast_rcnn_box_loss(
-            box_outputs=box_outputs,
-            box_targets=box_targets,
-            class_targets=class_targets,
-            loss_type=params['box_loss_type'],
-            normalizer=1.0
-        )
+        if not params['use_carl_loss']:
+            box_loss = _fast_rcnn_box_loss(
+                box_outputs=box_outputs,
+                box_targets=box_targets,
+                class_targets=class_targets,
+                loss_type=params['box_loss_type'],
+                normalizer=1.0
+            )
+        else:
+            box_loss = _fast_rcnn_box_carl_loss(
+                box_outputs=box_outputs,
+                box_targets=box_targets,
+                class_targets=class_targets,
+                class_outputs=class_outputs,
+                loss_type=params['box_loss_type'],
+                normalizer=2.0
+            )
+
         box_loss *= params['fast_rcnn_box_loss_weight']
 
         use_sparse_x_entropy = False
@@ -595,13 +646,11 @@ def fast_rcnn_loss(class_outputs, box_outputs, class_targets, box_targets, rpn_b
         )
 
         total_loss = class_loss + box_loss
-
     return total_loss, class_loss, box_loss
 
 
 def mask_rcnn_loss(mask_outputs, mask_targets, select_class_targets, params):
     """Computes the mask loss of Mask-RCNN.
-
     This function implements the mask loss of Mask-RCNN. As the `mask_outputs`
     produces `num_classes` masks for each RoI, the reference model expands
     `mask_targets` to match the shape of `mask_outputs` and selects only the
@@ -610,7 +659,6 @@ def mask_rcnn_loss(mask_outputs, mask_targets, select_class_targets, params):
     Instead, this implementation selects the `mask_outputs` by the `class_targets`
     so that it doesn't expand `mask_targets`. Note that the selection logic is
     done in the post-processing of mask_rcnn_fn in mask_rcnn_architecture.py.
-
     Args:
     mask_outputs: a float tensor representing the prediction for each mask,
       with a shape of

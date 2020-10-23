@@ -28,6 +28,11 @@ import subprocess
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
+os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
+os.environ['TF_GPU_THREAD_COUNT'] = '1'
+os.environ["TF_NUM_INTRAOP_THREADS"]="7"
+os.environ["TF_NUM_INTEROP_THREADS"]="6"
+
 
 from absl import app
 
@@ -41,8 +46,14 @@ if is_herring():
 
     from mask_rcnn.utils.distributed_utils_herring import MPI_rank, MPI_is_distributed
 else:
+    from mpi4py import MPI
+    CURR_GPU_INDEX=str(MPI.COMM_WORLD.Get_rank()%8)
+    os.environ["CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES",CURR_GPU_INDEX)
+    #os.environ["CUDA_VISIBLE_DEVICES"] = '0'    
     from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_is_distributed
-    
+
+
+
 from mask_rcnn.utils.logging_formatter import logging
 
 from mask_rcnn import dataloader

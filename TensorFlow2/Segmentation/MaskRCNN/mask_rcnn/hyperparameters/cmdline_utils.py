@@ -90,7 +90,16 @@ def define_hparams_flags():
             ' from input by setting `include_groundtruth_in_features`=True'
         )
     )
-    
+    flags.DEFINE_bool(
+        'use_default_roi_align',
+        default=True,
+        help='Use default ROIAlign implementation.'
+    )    
+    flags.DEFINE_bool(
+        'transposed_roi_align',
+        default=True,
+        help='Transpose ROI align. Default is NHWC'
+    )    
     flags.DEFINE_bool(
         'dist_eval',
         default=False,
@@ -151,9 +160,11 @@ def define_hparams_flags():
 
     flags.DEFINE_float("warmup_learning_rate", default=0., help="Warmup Learning Rate Decay Factor")
 
-    flags.DEFINE_bool('finetune_bn', False, 'is batchnorm training mode')
+    flags.DEFINE_bool('finetune_bn', False, 'Is batchnorm training mode')
+    
+    flags.DEFINE_bool('use_carl_loss', False, 'Add classification aware regression loss')
 
-    flags.DEFINE_float("l2_weight_decay", default=1e-4, help="l2 regularization weight")
+    flags.DEFINE_float("l2_weight_decay", default=1e-4, help="L2 regularization weight")
 
     flags.DEFINE_string('mode', default='train_and_eval', help='Mode to run: train or eval')
     
@@ -170,7 +181,11 @@ def define_hparams_flags():
         default=None,
         help='The directory where the model and training/evaluation summaries are stored.'
     )
-
+    flags.DEFINE_bool(
+        'preprocessed_data',
+        default=False,
+        help=('If set use precomputed masks.')
+    )
     flags.DEFINE_float("momentum", default=0.9, help="Optimizer Momentum")
     flags.DEFINE_float("beta1", default=0.9, help="novograd b1")
     flags.DEFINE_float("beta2", default=0.3, help="novograd b2")
@@ -232,6 +247,12 @@ def define_hparams_flags():
     )
 
     flags.DEFINE_bool('xla', default=False, help='Enable XLA JIT Compiler.')
+    
+    flags.DEFINE_bool(
+        'validate_preprocessed',
+        default=False,
+        help=('If set use precomputed masks.')
+    )
 
     flags.DEFINE_string('training_file_pattern', default="", help='TFRecords file pattern for the training files')
 
