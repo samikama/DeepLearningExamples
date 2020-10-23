@@ -1136,6 +1136,7 @@ class TapeModel(object):
         predict_total = 0
         process_total = 0
         append_total = 0
+        MPI.COMM_WORLD.barrier()
         start_total_infer = time.time()
         
         in_q = mp.Queue()
@@ -1211,7 +1212,7 @@ class TapeModel(object):
         print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
         print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
 
-#@profile_dec
+@profile_dec
 def coco_pre_process(in_q, out_q, finish_input):
       
       coco = coco_metric.MaskCOCO()
@@ -1259,5 +1260,5 @@ def coco_pre_process(in_q, out_q, finish_input):
         else:
           time.sleep(.05)
       out_q.put(converted_predictions)
-      #print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
+      print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
       return
