@@ -682,7 +682,7 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
     cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=use_ext, num_threads=24)
-    cocoEval.params.imgIds = imgIds
+    #cocoEval.params.imgIds = imgIds
     cocoEval.evaluate(dist=use_dist_coco_eval)
     cocoEval.accumulate()
     if(MPI_rank() == 0):
@@ -691,7 +691,7 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     #Segm
     cocoDt = cocoGt.loadRes(predictions, use_ext=use_ext)
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=use_ext, num_threads=24)
-    cocoEval.params.imgIds = imgIds
+    #cocoEval.params.imgIds = imgIds
     cocoEval.evaluate(dist=use_dist_coco_eval)
     cocoEval.accumulate()
     if(MPI_rank() == 0):

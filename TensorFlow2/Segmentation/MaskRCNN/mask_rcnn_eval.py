@@ -112,10 +112,13 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
     while 1:
       try:
         batches.append(next(mrcnn_model.eval_tdf)['features'])
+        print(batches[-1]['images'].shape)
       except Exception as e:
         #Should only break when out of data
         break
     steps = len(batches)
+    print(steps)
+    exit(1)
     
     mrcnn_model.initialize_eval_model(batches[0])
    
