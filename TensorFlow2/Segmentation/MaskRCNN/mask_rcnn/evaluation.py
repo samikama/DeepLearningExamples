@@ -71,7 +71,6 @@ def profile_dec(func):
 def process_prediction_for_eval(prediction):
     """Process the model prediction for COCO eval."""
     print("Still running the normal Eval")
-    exit(1)
     image_info = prediction['image_info']
     box_coordinates = prediction['detection_boxes']
     processed_box_coordinates = np.zeros_like(box_coordinates)
@@ -94,6 +93,9 @@ def process_prediction_for_eval_batch(prediction):
     image_info = prediction['image_info']
     box_coordinates = prediction['detection_boxes']
     processed_box_coordinates = np.zeros_like(box_coordinates)
+    
+    if(MPI_rank() == 0):
+      print("Box Coordinates ", box_coordinates.shape)
 
     for image_id in range(box_coordinates.shape[0]):
         scale = image_info[image_id][2]
@@ -336,7 +338,7 @@ def gather_result_from_all_processes(local_results, root=0):
   rank = comm.Get_rank()
   size = comm.Get_size()
   res = comm.gather(local_results, root=0)
-
+  
   return res
 
 def evaluate(eval_estimator,
@@ -663,21 +665,24 @@ def coco_mask_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     print(f"Prepocessing mask {preproc_end - start} coco c++ ext {time.time() - preproc_end}")
 
 def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
-    # import pickle
-    # with open("/tmp/coco_data", 'wb') as fp:
-    #   obj = pickle.dump(predictions, fp)
+    #import pickle
+    #with open("/tmp/coco_data", 'wb') as fp:
+    #  pickle.dump(predictions, fp)
 
     imgIds = []
+    catIds = []
     box_predictions = np.empty((len(predictions), 7))
     for ii, prediction in enumerate(predictions):
       imgIds.append(prediction['image_id'])
+      catIds.append(prediction['category_id'])
       box_predictions[ii,0] = prediction['image_id']
       box_predictions[ii,1:5] = prediction['bbox'][:4] 
       box_predictions[ii, 5:]= [float(prediction['score']), prediction['category_id']]
       del prediction['bbox']
 
     imgIds = list(set(imgIds))
-    print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions))
+    catIds = list(set(catIds))
+    print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions), len(catIds))
     #BBox
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
     cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)
@@ -687,6 +692,9 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     cocoEval.accumulate()
     if(MPI_rank() == 0):
       cocoEval.summarize()
+      print(cocoEval.eval['precision'].shape)
+      print(cocoEval.eval['recall'].shape)
+      print(cocoEval.eval['scores'].shape)
     
     #Segm
     cocoDt = cocoGt.loadRes(predictions, use_ext=use_ext)
@@ -696,6 +704,9 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     cocoEval.accumulate()
     if(MPI_rank() == 0):
       cocoEval.summarize()
+      print(cocoEval.eval['precision'].shape)
+      print(cocoEval.eval['recall'].shape)
+      print(cocoEval.eval['scores'].shape)
     
     return
 

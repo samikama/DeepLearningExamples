@@ -325,8 +325,12 @@ class MaskCOCO(COCO):
             int(detection_results['image_info'][i][4]),
             is_image_mask=is_image_mask
         )
-
-        encoded_masks = maskUtils.encode(segments)
+        
+        #encoded_masks = maskUtils.encode(segments)
+        encoded_masks = [
+            maskUtils.encode(instance_mask)
+            for instance_mask in segments
+        ]
 
       for box_index in range(int(detection_results['num_detections'][i])):
         #if current_index % 1000 == 0:
@@ -406,7 +410,8 @@ def generate_segmentation_from_masks(masks,
   ref_boxes = expand_boxes(detected_boxes, scale)
   ref_boxes = ref_boxes.astype(np.int32)
   padded_mask = np.zeros((mask_height + 2, mask_width + 2), dtype=np.float32)
-  segms = np.zeros((image_height, image_width, len(masks)), dtype=np.uint8, order='F')
+  #segms = np.zeros((image_height, image_width, len(masks)), dtype=np.uint8, order='F')
+  segms = []
   for mask_ind, mask in enumerate(masks):
     im_mask = np.zeros((image_height, image_width), dtype=np.uint8, order='F')
     if is_image_mask:
@@ -432,9 +437,10 @@ def generate_segmentation_from_masks(masks,
 
       im_mask[y_0:y_1, x_0:x_1] = mask[(y_0 - ref_box[1]):(y_1 - ref_box[1]), (
           x_0 - ref_box[0]):(x_1 - ref_box[0])]
-    segms[:,:,mask_ind] = im_mask
+    segms.append(im_mask)
 
-  assert masks.shape[0] == segms.shape[2]
+  assert masks.shape[0] == len(segms)
+  
   return segms
 
 def parallel_encode(segments, out_q):

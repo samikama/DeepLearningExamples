@@ -1137,7 +1137,6 @@ class TapeModel(object):
         process_total = 0
         append_total = 0
         start_total_infer = time.time()
-        print("Start method is ", mp.get_start_method())
         
         in_q = mp.Queue()
         out_q = mp.Queue()
@@ -1180,6 +1179,13 @@ class TapeModel(object):
         if(not use_dist_coco_eval):
           
           predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
+          if MPI_rank(is_herring()) == 0:
+            print("Pred list is ", len(predictions_list))
+            total_preds = 0
+            for each in predictions_list:
+              total_preds += len(each)
+            print("Total preds is ", total_preds)
+
           validation_json_file=self.params.val_json_file
           end_gather_result = time.time()
           #with cProfile.Profile() as pr:
