@@ -119,7 +119,7 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
         #Should only break when out of data
         break
     steps = len(batches)
-    print(total_samples)
+    print("Total Samples are ", total_samples)
     
     mrcnn_model.initialize_eval_model(batches[0])
    

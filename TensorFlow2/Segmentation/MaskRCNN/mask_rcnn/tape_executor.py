@@ -20,7 +20,7 @@ import tensorflow as tf
 #mixed_precision.set_policy(policy)
 #Remeber to verify this runs on the OFFLOAD, Can run in Main file
 tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
-#tf.config.optimizer.set_jit(True)
+tf.config.optimizer.set_jit(True)
 
 
 def train_and_eval(run_config, train_input_fn, eval_input_fn):

@@ -1172,20 +1172,12 @@ class TapeModel(object):
         #  tf.profiler.experimental.stop()
 
         
-        print(f"{MPI_rank(is_herring())}|Finished Joining Threads",flush=True)
-        
         end_total_infer = time.time()
         MPI.COMM_WORLD.barrier()
         if(not use_dist_coco_eval):
           
           predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
-          if MPI_rank(is_herring()) == 0:
-            print("Pred list is ", len(predictions_list))
-            total_preds = 0
-            for each in predictions_list:
-              total_preds += len(each)
-            print("Total preds is ", total_preds)
-
+          
           validation_json_file=self.params.val_json_file
           end_gather_result = time.time()
           #with cProfile.Profile() as pr:
@@ -1215,8 +1207,6 @@ class TapeModel(object):
           validation_json_file=self.params.val_json_file
           evaluation.fast_eval(converted_predictions, validation_json_file, use_ext, use_dist_coco_eval)
 
-        #ps = pstats.Stats(pr).sort_stats('cumtime')
-          #ps.print_stats()
         end_coco_eval = time.time()
         print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
         print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
