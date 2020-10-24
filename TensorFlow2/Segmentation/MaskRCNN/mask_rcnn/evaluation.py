@@ -679,7 +679,7 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
 
     imgIds = list(set(imgIds))
     catIds = list(set(catIds))
-    #print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions), len(catIds))
+    print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions), len(catIds))
 
     #BBox
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
@@ -703,16 +703,4 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
       
     
     return
-
-    #Currently MPI craps out
-    box_proc = mp.Process(target=coco_box_eval, args=(predictions, annotations_file,use_ext, use_dist_coco_eval))
-    mask_proc = mp.Process(target=coco_mask_eval, args=(predictions, annotations_file, use_ext, use_dist_coco_eval))
-    box_proc.start()
-    mask_proc.start()
-    box_proc.join()
-    mask_proc.join()
-
-    
-    return
-    
   
