@@ -1212,7 +1212,7 @@ class TapeModel(object):
           evaluation.fast_eval(converted_predictions, validation_json_file, use_ext, use_dist_coco_eval)
 
         end_coco_eval = time.time()
-        if(MPI_rank(is_herring) == 0):
+        if(MPI_rank(is_herring()) == 0):
           print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
           print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
 
