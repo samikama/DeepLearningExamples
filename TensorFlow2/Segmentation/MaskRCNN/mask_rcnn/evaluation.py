@@ -687,15 +687,15 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox', use_ext=use_ext, num_threads=24)
     cocoEval.params.imgIds = imgIds
     cocoEval.evaluate(dist=use_dist_coco_eval)
-    cocoEval.accumulate()
     
     #Segm
     scocoDt = cocoGt.loadRes(predictions, use_ext=use_ext)
     scocoEval = COCOeval(cocoGt, cocoDt, iouType='segm', use_ext=use_ext, num_threads=24)
     scocoEval.params.imgIds = imgIds
     scocoEval.evaluate(dist=use_dist_coco_eval)
-    scocoEval.accumulate()
     if(MPI_rank() == 0):
+      cocoEval.accumulate()
+      scocoEval.accumulate()
       logging.info("Bbox Summary")
       cocoEval.summarize()
       logging.info("Segm Summary")
