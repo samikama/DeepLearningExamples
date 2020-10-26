@@ -26,13 +26,16 @@ import time
 import itertools
 import copy
 import numpy as np
-import multiprocessing
 from statistics import mean
 import threading
 from math import ceil
 from mpi4py import MPI
 from tqdm import tqdm
 import os
+
+import multiprocessing as mp
+import queue
+#mp.set_start_method('spawn')
 
 import h5py
 import tensorflow as tf
@@ -66,7 +69,19 @@ from mask_rcnn.tf2.utils import warmup_scheduler, eager_mapping
 from mask_rcnn.utils.meters import StandardMeter
 from mask_rcnn.utils.metric_tracking import register_metric
 from mask_rcnn.utils.herring_env import is_herring
-
+from tensorflow.python.profiler import profiler_v2 as tf_profiler
+from tensorflow.python.profiler.trace import Trace as prof_Trace
+try:
+    from tensorflow.python import _pywrap_nvtx as nvtx
+except ImportError:
+    class DummyNvtx:
+        def __init__(self):
+            pass
+        def push(self,a=None,b=None):
+            pass
+        def pop(self,a=None):
+            pass
+    nvtx=DummyNvtx()
 
 if is_herring():
     import herring.tensorflow as herring
@@ -91,6 +106,17 @@ except ImportError:
 
 MODELS = dict()
 
+import cProfile, pstats
+
+def profile_dec(func):
+  def wrapper(*args, **kwargs):
+    with cProfile.Profile() as pr:
+      ret = func(*args, **kwargs)
+      ps = pstats.Stats(pr).sort_stats('cumtime')
+      ps.print_stats()
+    return ret
+  
+  return wrapper
 
 def create_optimizer(learning_rate, params):
     """Creates optimized based on the specified flags."""
@@ -365,9 +391,9 @@ class MRCNN(tf.keras.Model):
                 'detection_scores': detections[3],
             })
             # testing outputs
-            model_outputs.update({'class_outputs': tf.nn.softmax(class_outputs),
-                                  'box_outputs': box_outputs,
-                                  'anchor_boxes': rpn_box_rois})
+            #model_outputs.update({'class_outputs': tf.nn.softmax(class_outputs),
+            #                      'box_outputs': box_outputs,
+            #                      'anchor_boxes': rpn_box_rois})
         else:  # is training
             def is_iou_based_loss(loss_type):
                 return loss_type in ["giou", "diou", "ciou", "iou"]
@@ -862,7 +888,7 @@ class SessionModel(object):
             config.graph_options.optimizer_options.global_jit_level = tf.compat.v1.OptimizerOptions.ON_1
         config.intra_op_parallelism_threads = 1  # Avoid pool of Eigen threads
         if MPI_is_distributed():
-            config.inter_op_parallelism_threads = max(2, multiprocessing.cpu_count() // hvd.local_size())
+            config.inter_op_parallelism_threads = max(2, mp.cpu_count() // hvd.local_size())
         elif not use_tf_distributed:
             config.inter_op_parallelism_threads = 4
         return config
@@ -879,7 +905,7 @@ class TapeModel(object):
         self.train_tdf = iter(train_input_fn(train_params)) \
                             if train_input_fn else None
         eval_params = dict(self.params.values(), batch_size=self.params.eval_batch_size)
-        self.eval_tdf = iter(eval_input_fn(eval_params).repeat()) \
+        self.eval_tdf = iter(eval_input_fn(eval_params)) \
                             if eval_input_fn else None
         self.optimizer, self.schedule = self.get_optimizer()
         self.epoch_num = 0
@@ -979,7 +1005,7 @@ class TapeModel(object):
                 (clipped_grads, _) = tf.clip_by_global_norm(gradients, clip_norm=global_gradient_clip_ratio,
                                 use_norm=tf.cond(all_are_finite, lambda: tf.linalg.global_norm(gradients), lambda: tf.constant(1.0)))
                 gradients = clipped_grads
-        
+            
             grads_and_vars = []
             # Special treatment for biases (beta is named as bias in reference model)
             # Reference: https://github.com/ddkang/Detectron/blob/80f3295308/lib/modeling/optimizer.py#L109
@@ -989,7 +1015,7 @@ class TapeModel(object):
                 grads_and_vars.append((grad, var))
 
             # self.optimizer.apply_gradients(zip(gradients, self.forward.trainable_variables))
-            self.optimizer.apply_gradients(grads_and_vars)
+            self.optimizer.apply_gradients(grads_and_vars) 
             if MPI_is_distributed(True) and sync_weights:
                 if MPI_rank(True)==0:
                     logging.info("Broadcasting variables")
@@ -1039,6 +1065,10 @@ class TapeModel(object):
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
     
+    def initialize_eval_model(self, features):
+        for _ in range(5):
+          _ = self.predict(features)
+          
     def train_epoch(self, steps, broadcast=False, profile=None):
         if MPI_rank(is_herring())==0:
             logging.info("Starting training loop")
@@ -1058,7 +1088,6 @@ class TapeModel(object):
                     b_w, b_o = False, True
                 else:
                     b_w, b_o = False, False
-                
                 b_w = tf.convert_to_tensor(b_w)
                 b_o = tf.convert_to_tensor(b_o)
                 with prof_Trace(f"Step-",step_num=i,_r=1):
@@ -1076,7 +1105,6 @@ class TapeModel(object):
         else:
             runtype="TrainStep"
             for i in p_bar:
-
                 if i == 5 and self.epoch_num == 0:
                     st = time.time()
                 if broadcast and i==0:
@@ -1086,13 +1114,13 @@ class TapeModel(object):
                 else:
                     b_w, b_o = False, False
                 tstart=time.perf_counter()
-                #step_token=nvtx.push(f"{runtype}-{i}",runtype)
+                step_token=nvtx.push(f"{runtype}-{i}",runtype)
                 features, labels = next(self.train_tdf)
                 b_w = tf.convert_to_tensor(b_w)
                 b_o = tf.convert_to_tensor(b_o)
                 loss_dict = self.train_step(features, labels, b_w, b_o)
                 times.append(time.perf_counter()-tstart)
-                #nvtx.pop(step_token)
+                nvtx.pop(step_token)
                 if MPI_rank(is_herring())==0:
                     loss_history.append(loss_dict['total_loss'].numpy())
                     step = self.optimizer.iterations
@@ -1131,69 +1159,153 @@ class TapeModel(object):
             weights.append(file['weight'+str(i)][:])
         self.forward.set_weights(weights)
     
-
     @tf.function            
     def predict(self, features):
         labels = None
-        model_outputs = self.forward(features, labels, self.params.values(), False)
+        model_outputs = self.forward(features, labels, self.params.values(), is_training=False)
         model_outputs.update({
                 'source_id': features['source_ids'],
                 'image_info': features['image_info'],
             })
         return model_outputs
-            
-    def run_eval(self, steps, async_eval=False, use_ext=False):
+    #@profile_dec
+    def run_eval(self, steps, batches, async_eval=False, use_ext=False, use_dist_coco_eval=False):
+        #steps = 5
         if MPI_rank(is_herring())==0:
             logging.info("Starting eval loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         else:
             p_bar = range(steps)
         worker_predictions = dict()
-        for i in p_bar:
-            features = next(self.eval_tdf)['features']
-            out = self.predict(features)
-            out = evaluation.process_prediction_for_eval(out)
-            for k, v in out.items():
-                if k not in worker_predictions:
-                    worker_predictions[k] = [v]
-                else:
-                    worker_predictions[k].append(v)
-        coco = coco_metric.MaskCOCO()
-        _preds = copy.deepcopy(worker_predictions)
-        for k, v in _preds.items():
-            _preds[k] = np.concatenate(v, axis=0)
-        if MPI_rank(is_herring()) < 32:
-            converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
-            worker_source_ids = _preds['source_id']
-        else:
-            converted_predictions = []
-            worker_source_ids = []
+        data_load_total = 0
+        predict_total = 0
+        process_total = 0
+        append_total = 0
         MPI.COMM_WORLD.barrier()
-        predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
-        source_ids_list = evaluation.gather_result_from_all_processes(worker_source_ids)
-        validation_json_file=self.params.val_json_file
-        if MPI_rank(is_herring()) == 0:
-            all_predictions = []
-            source_ids = []
-            for i, p in enumerate(predictions_list):
-                if i < 32:
-                    all_predictions.extend(p)
-            for i, s in enumerate(source_ids_list):
-                if i < 32:
-                    source_ids.extend(s)
-            if use_ext:
-                args = [all_predictions, validation_json_file]
-                if async_eval:
-                    eval_thread = threading.Thread(target=evaluation.fast_eval,
-                                                   name="eval-thread", args=args)
-                    eval_thread.start()
-                else:
-                    evaluation.fast_eval(*args)
-            else:
-                args = [all_predictions, source_ids, True, validation_json_file]
-                if async_eval:
-                    eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
-                                                   name="eval-thread", args=args)
-                    eval_thread.start()
-                else:
-                    evaluation.compute_coco_eval_metric_n(*args)
+        start_total_infer = time.time()
+        
+        in_q = mp.Queue()
+        out_q = mp.Queue()
+        stop_event = mp.Event()
+        stop_event.clear()
+        post_proc = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
+        post_proc2 = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
+        post_proc3 = mp.Process(target=coco_pre_process, args=(in_q, out_q, stop_event))
+        post_proc.start()
+        post_proc2.start()
+        post_proc3.start()
+
+        #if MPI_rank(is_herring())==0:
+        #  tf.profiler.experimental.start('logdir')
+
+        for i in p_bar:
+            start = time.time()
+            features = batches[i]#next(self.eval_tdf)['features']
+            data_load_time = time.time()
+            data_load_total += data_load_time-start
+            out = self.predict(features)
+            predict_time = time.time()
+            predict_total += predict_time - data_load_time
+            #Extract numpy from tensors
+            for key in out:
+              out[key] = out[key].numpy()
+            in_q.put(out, False)
+        stop_event.set()
+        #Should expect num threads items in queue
+        converted_predictions = out_q.get() + out_q.get() + out_q.get()
+        post_proc.join()
+        post_proc2.join()
+        post_proc3.join()
+
+        #if MPI_rank(is_herring())==0:
+        #  tf.profiler.experimental.stop()
+
+        
+        end_total_infer = time.time()
+        MPI.COMM_WORLD.barrier()
+        if(not use_dist_coco_eval):
+          
+          predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
+          
+          validation_json_file=self.params.val_json_file
+          end_gather_result = time.time()
+          #with cProfile.Profile() as pr:
+          if MPI_rank(is_herring()) == 0:
+              all_predictions = []
+              for i, p in enumerate(predictions_list):
+                  if i < 32:
+                      all_predictions.extend(p)
+              if use_ext:
+                  args = [all_predictions, validation_json_file, use_ext, False]
+                  if async_eval:
+                      eval_thread = threading.Thread(target=evaluation.fast_eval,
+                                                    name="eval-thread", args=args)
+                      eval_thread.start()
+                  else:
+                      evaluation.fast_eval(*args)
+              else:
+                  args = [all_predictions, source_ids, True, validation_json_file]
+                  if async_eval:
+                      eval_thread = threading.Thread(target=evaluation.compute_coco_eval_metric_n, 
+                                                    name="eval-thread", args=args)
+                      eval_thread.start()
+                  else:
+                      evaluation.compute_coco_eval_metric_n(*args)
+        else:
+          end_gather_result = time.time()
+          validation_json_file=self.params.val_json_file
+          evaluation.fast_eval(converted_predictions, validation_json_file, use_ext, use_dist_coco_eval)
+
+        end_coco_eval = time.time()
+        if(MPI_rank(is_herring()) == 0):
+          print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
+          print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
+
+#@profile_dec
+def coco_pre_process(in_q, out_q, finish_input):
+      
+      coco = coco_metric.MaskCOCO()
+      #wait until event is set
+      converted_predictions = []
+      total_preproc = 0
+      preproc_cnt = 0
+      while(not finish_input.is_set() or not in_q.empty()):
+        if(not in_q.empty()):
+          start = time.time()
+          preproc_cnt +=1
+          worker_predictions = {}
+          try:
+            out = in_q.get(False)
+          except queue.Empty:
+            continue
+
+          out = evaluation.process_prediction_for_eval_batch(out)
+          for k, v in out.items():
+              if k not in worker_predictions:
+                  worker_predictions[k] = [v]
+              else:
+                  worker_predictions[k].append(v)
+          for k, v in worker_predictions.items():
+              worker_predictions[k] = np.concatenate(v, axis=0)
+          
+          # score_threshold = .2
+          # print(out['detection_scores'].shape, flush=True)
+          
+          # for ii in range(len(out['detection_scores'])):
+          #   thold = out['detection_scores'][ii] > score_threshold
+          #   thold_shape = out['detection_scores'][ii].shape
+          #   for key in out:
+          #     print(out[key][ii].shape, thold_shape)
+          #     if(out[key][ii].shape != thold_shape):
+          #       print(key)
+          #       continue
+          #     out[key][ii] = out[key][ii][thold]
+          
+          # print("POST",out['detection_scores'].shape, flush=True)
+
+          converted_predictions += coco.load_predictions(worker_predictions, include_mask=True, is_image_mask=False)
+          end_coco_load = time.time()
+          total_preproc += end_coco_load - start
+      out_q.put(converted_predictions)
+      #print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
+      return

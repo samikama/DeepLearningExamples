@@ -29,6 +29,7 @@ import atexit
 import copy
 import tempfile
 import numpy as np
+import time
 
 import tensorflow as tf
 
@@ -40,6 +41,20 @@ import pycocotools.mask as maskUtils
 
 import cv2
 
+import multiprocessing as mp
+import threading
+
+import cProfile, pstats
+
+def profile_dec(func):
+  def wrapper(*args, **kwargs):
+    with cProfile.Profile() as pr:
+      ret = func(*args, **kwargs)
+      ps = pstats.Stats(pr).sort_stats('cumtime')
+      ps.print_stats()
+    return ret
+  
+  return wrapper
 
 class MaskCOCO(COCO):
   """COCO object for mask evaluation.
@@ -167,7 +182,119 @@ class MaskCOCO(COCO):
 
     res.createIndex() # use_ext=True)
     return res
+  #@profile_dec
+  def load_predictions_mp(self, 
+                       detection_results,
+                       include_mask,
+                       is_image_mask=False):
+    
+  
+    """Create prediction dictionary list from detection and mask results.
 
+    Args:
+      detection_results: a dictionary containing numpy arrays which corresponds
+        to prediction results.
+      include_mask: a boolean, whether to include mask in detection results.
+      is_image_mask: a boolean, where the predict mask is a whole image mask.
+
+    Returns:
+      a list of dictionary including different prediction results from the model
+        in numpy form.
+    """
+    # predictions = []
+    # total_len = len(detection_results['source_id'])
+    # num_workers = 2
+    # ranges = []
+    # for x in range(0,total_len, total_len//num_workers):
+    #   tmp = [x, x+total_len//num_workers] if x+total_len//num_workers < total_len else [x, total_len]
+    #   ranges.append(tmp)
+    
+    # num_workers = len(ranges)
+    # procs = []
+    # with mp.Manager() as manager:
+    #   d = manager.Queue()
+    #   for ii in ranges:
+    #     proc = mp.Process(target=load_predictions_parallel, args=(ii, include_mask, is_image_mask, detection_results, d))
+    #     proc.start()
+    #     procs.append(proc)
+        
+    #   for proc in procs:
+    #     proc.join()
+
+    #   while not d.empty():
+    #     predictions += d.get()
+
+    # return predictions
+
+    predictions = []
+    num_detections = detection_results['detection_scores'].size
+    current_index = 0
+    for i, image_id in enumerate(detection_results['source_id']):
+
+      if include_mask:
+        segments = generate_segmentation_from_masks(
+            detection_results['detection_masks'][i],
+            detection_results['detection_boxes'][i],
+            int(detection_results['image_info'][i][3]),
+            int(detection_results['image_info'][i][4]),
+            is_image_mask=is_image_mask
+        )
+
+        # Convert the mask to uint8 and then to fortranarray for RLE encoder.
+
+        # encoded_masks = [
+        #     maskUtils.encode(instance_mask)
+        #     for instance_mask in segments
+        # ]
+        # num_workers = 2
+        # total_len = len(segments)
+        # work_split = []
+        # for x in range(0,total_len, total_len//num_workers):
+        #   tmp = [x, x+total_len//num_workers] if x+total_len//num_workers < total_len else [x, total_len]
+        #   work_split.append(segments[tmp[0]:tmp[1]])
+
+        
+        # num_workers = len(work_split)
+        # procs = []
+        # encoded_masks = []
+        # with mp.Manager() as manager:
+        #   d = manager.Queue()
+        #   for ii in work_split:
+        #     proc = threading.Thread(target=parallel_encode, args=(ii, d))
+        #     proc.start()
+        #     procs.append(proc)
+            
+        #   for proc in procs:
+        #     proc.join()
+
+        #   while not d.empty():
+        #     encoded_masks += d.get()
+        pool = mp.dummy.Pool(processes=10)
+        encoded_masks = pool.map(maskUtils.encode, segments)
+        
+
+      for box_index in range(int(detection_results['num_detections'][i])):
+        #if current_index % 1000 == 0:
+        #  logging.info('{}/{}'.format(current_index, num_detections))
+
+        current_index += 1
+
+        prediction = {
+            'image_id': int(image_id),
+            'bbox': detection_results['detection_boxes'][i][box_index].tolist(),
+            'score': detection_results['detection_scores'][i][box_index],
+            'category_id': int(
+                detection_results['detection_classes'][i][box_index]),
+        }
+
+        if include_mask:
+          prediction['segmentation'] = encoded_masks[box_index]
+
+        predictions.append(prediction)
+    return predictions
+
+    
+  
   def load_predictions(self,
                        detection_results,
                        include_mask,
@@ -186,34 +313,30 @@ class MaskCOCO(COCO):
     """
     predictions = []
     num_detections = detection_results['detection_scores'].size
+    threshold = 0
     current_index = 0
     for i, image_id in enumerate(detection_results['source_id']):
 
       if include_mask:
-        box_coorindates_in_image = detection_results['detection_boxes'][i]
         segments = generate_segmentation_from_masks(
             detection_results['detection_masks'][i],
-            box_coorindates_in_image,
+            detection_results['detection_boxes'][i],
             int(detection_results['image_info'][i][3]),
             int(detection_results['image_info'][i][4]),
             is_image_mask=is_image_mask
         )
-
-        # Convert the mask to uint8 and then to fortranarray for RLE encoder.
-        encoded_masks = [
-            maskUtils.encode(np.asfortranarray(instance_mask.astype(np.uint8)))
-            for instance_mask in segments
-        ]
+        
+        encoded_masks = maskUtils.encode(segments)
 
       for box_index in range(int(detection_results['num_detections'][i])):
         if current_index % 1000 == 0:
           logging.info('{}/{}'.format(current_index, num_detections))
 
         current_index += 1
-
+        #if(detection_results['detection_scores'][i][box_index] >= threshold):
         prediction = {
             'image_id': int(image_id),
-            'bbox': detection_results['detection_boxes'][i][box_index].tolist(),
+            'bbox': detection_results['detection_boxes'][i][box_index],#.tolist(),
             'score': detection_results['detection_scores'][i][box_index],
             'category_id': int(
                 detection_results['detection_classes'][i][box_index]),
@@ -223,7 +346,6 @@ class MaskCOCO(COCO):
           prediction['segmentation'] = encoded_masks[box_index]
 
         predictions.append(prediction)
-
     return predictions
 
 
@@ -284,9 +406,9 @@ def generate_segmentation_from_masks(masks,
   ref_boxes = expand_boxes(detected_boxes, scale)
   ref_boxes = ref_boxes.astype(np.int32)
   padded_mask = np.zeros((mask_height + 2, mask_width + 2), dtype=np.float32)
-  segms = []
+  segms = np.zeros((image_height, image_width, len(masks)), dtype=np.uint8, order='F')
   for mask_ind, mask in enumerate(masks):
-    im_mask = np.zeros((image_height, image_width), dtype=np.uint8)
+    im_mask = np.zeros((image_height, image_width), dtype=np.uint8, order='F')
     if is_image_mask:
       # Process whole-image masks.
       im_mask[:, :] = mask[:, :]
@@ -301,7 +423,7 @@ def generate_segmentation_from_masks(masks,
       h = np.maximum(h, 1)
 
       mask = cv2.resize(padded_mask, (w, h))
-      mask = np.array(mask > 0.5, dtype=np.uint8)
+      mask = mask > 0.5
 
       x_0 = max(ref_box[0], 0)
       x_1 = min(ref_box[2] + 1, image_width)
@@ -310,12 +432,68 @@ def generate_segmentation_from_masks(masks,
 
       im_mask[y_0:y_1, x_0:x_1] = mask[(y_0 - ref_box[1]):(y_1 - ref_box[1]), (
           x_0 - ref_box[0]):(x_1 - ref_box[0])]
-    segms.append(im_mask)
+    segms[:,:,mask_ind] = im_mask
 
-  segms = np.array(segms)
-  assert masks.shape[0] == segms.shape[0]
+  assert masks.shape[0] == segms.shape[2]
   return segms
 
+def parallel_encode(segments, out_q):
+  encoded_masks = [
+            maskUtils.encode(instance_mask)
+            for instance_mask in segments
+        ]
+  out_q.put(encoded_masks)
+
+def load_predictions_parallel(index_range, include_mask, is_image_mask, detection_results, retQueue):
+
+  predictions = []
+  current_index = 0
+  num_detections = detection_results['detection_scores'].size
+  total_time_taken = 0
+  for i in range(index_range[0], index_range[1]):
+    start = time.time()
+    image_id = detection_results['source_id'][i]
+    if include_mask:
+      #box_coorindates_in_image = detection_results['detection_boxes'][i]
+      segments = generate_segmentation_from_masks(
+          detection_results['detection_masks'][i],
+          #box_coorindates_in_image,
+          detection_results['detection_boxes'][i],
+          int(detection_results['image_info'][i][3]),
+          int(detection_results['image_info'][i][4]),
+          is_image_mask=is_image_mask
+      )
+
+      # Convert the mask to uint8 and then to fortranarray for RLE encoder.
+      encoded_masks = [
+          maskUtils.encode(instance_mask)
+          for instance_mask in segments
+      ]
+
+    for box_index in range(int(detection_results['num_detections'][i])):
+      #if current_index % 1000 == 0:
+      #  logging.info('{}/{}'.format(current_index, num_detections))
+
+      current_index += 1
+
+      prediction = {
+          'image_id': int(image_id),
+          'bbox': detection_results['detection_boxes'][i][box_index].tolist(),
+          'score': detection_results['detection_scores'][i][box_index],
+          'category_id': int(
+              detection_results['detection_classes'][i][box_index]),
+      }
+
+      if include_mask:
+        prediction['segmentation'] = encoded_masks[box_index]
+
+      predictions.append(prediction)
+    total_time_taken += time.time() - start
+  
+  print(f"Average time taken per pred {total_time_taken/current_index}, total time {total_time_taken}")
+  
+  retQueue.put(predictions)
+  return True
 
 class EvaluationMetric(object):
   """COCO evaluation metric class."""

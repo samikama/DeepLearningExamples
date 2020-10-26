@@ -15,9 +15,10 @@
 
 # Batch size per gpu 4 on arbitrary number of nodes
 # as specified in hosts file
+set -x
 
 BATCH_SIZE=1
-HOST_COUNT=`wc -l < /shared/hostfile`
+HOST_COUNT=`wc -l < ./hostfile`
 GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
@@ -29,9 +30,9 @@ LR_MULTIPLIER=0.001
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
+/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output -v --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile /shared/eval_hostfile \
+    --hostfile ./hostfile \
     -N 8 \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
@@ -60,8 +61,8 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
-        --validation_file_pattern="/shared/data/nv_tfrecords/val*.tfrecord" \
+        --training_file_pattern="/shared/data/train*.tfrecord" \
+        --validation_file_pattern="/shared/data/val*.tfrecord" \
         --val_json_file="/shared/data/nv_tfrecords/annotations/instances_val2017.json" \
         --amp \
         --xla \

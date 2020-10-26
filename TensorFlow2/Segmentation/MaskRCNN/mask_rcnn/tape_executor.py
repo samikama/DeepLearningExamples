@@ -21,18 +21,26 @@ else:
 
 import tensorflow as tf
 
+#from tensorflow.keras.mixed_precision import experimental as mixed_precision
+#policy = mixed_precision.Policy('mixed_float16')
+#mixed_precision.set_policy(policy)
+#Remeber to verify this runs on the OFFLOAD, Can run in Main file
+tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
+#tf.config.optimizer.set_jit(True)
+
 
 def train_and_eval(run_config, train_input_fn, eval_input_fn):
     
     if is_herring():
         import herring.tensorflow as herring
-        gpus = tf.config.list_physical_devices('GPU')
         
+        gpus = tf.config.list_physical_devices('GPU')
         if tf.__version__ == "2.4.0":
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
         if gpus:
             tf.config.set_visible_devices(gpus[herring.local_rank()], 'GPU')
+            #tf.config.set_visible_devices(gpus[0], 'GPU')
     else:
         if MPI_is_distributed(False):
             import horovod.tensorflow as hvd
@@ -41,6 +49,8 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
         devices = tf.config.list_physical_devices('GPU')
         tf.config.set_visible_devices([devices[0]], 'GPU')
         logical_devices = tf.config.list_logical_devices('GPU')
+       # tf.config.set_visible_devices([devices[MPI_local_rank()]], 'GPU')
+       # logical_devices = tf.config.list_logical_devices('GPU')
 
     tf.config.optimizer.set_experimental_options({"auto_mixed_precision": run_config.amp})
     tf.config.optimizer.set_jit(run_config.xla)
@@ -48,12 +58,16 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn)
     mrcnn_model.initialize_model()
     eval_workers = min(MPI_size(is_herring()), 32)
-    
+
+    profile_path=None
+    if run_config.profile_path:
+        profile_path=run_config.profile_path
     if run_config.offload_eval:
-        for epoch in range(run_config.first_eval, total_epochs):
+    #if True:
+        for epoch in range(total_epochs):
             if MPI_rank(is_herring())==0:
                 logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+            mrcnn_model.train_epoch(run_config.total_steps, broadcast=epoch==0, profile=f"{profile_path}_{epoch}" if profile_path else None)
     
     else:
         #for epoch in range(1):

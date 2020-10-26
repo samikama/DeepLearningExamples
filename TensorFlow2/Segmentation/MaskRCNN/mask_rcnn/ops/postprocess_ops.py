@@ -286,7 +286,7 @@ def generate_detections_gpu(class_outputs,
             max_output_size_per_class=pre_nms_num_detections,
             max_total_size=post_nms_num_detections,
             iou_threshold=nms_threshold,
-            score_threshold=0.0,
+            score_threshold=0.05, #This seems to be python default
             pad_per_class=False
         )
 

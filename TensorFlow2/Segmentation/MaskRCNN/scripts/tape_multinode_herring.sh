@@ -16,9 +16,10 @@
 # Batch size per gpu 4 on arbitrary number of nodes
 # as specified in hosts file
 
+
+HOST_COUNT=8
+GPU_COUNT=8
 BATCH_SIZE=1
-HOST_COUNT=`wc -l < /shared/hostfile`
-GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
 STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
@@ -32,10 +33,10 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 rm -rf $BASEDIR/../results_tape_1x
 mkdir -p $BASEDIR/../results_tape_1x
 
-herringrun -n 8 --homogeneous \
-    RUN_HERRING=1 /shared/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
+/shared/sami/conda/bin/herringrun -n 8 --homogeneous -c /shared/sami/conda \
+    RUN_HERRING=1 /shared/sami/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
-        --checkpoint="/shared/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+        --checkpoint="/shared/sami/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --loop_mode="tape" \
         --log_interval=100 \
@@ -53,9 +54,9 @@ herringrun -n 8 --homogeneous \
         --train_batch_size=$BATCH_SIZE \
         --eval_batch_size=1 \
         --dist_eval \
-	--training_file_pattern="/shared/data/nv_tfrecords/train*.tfrecord" \
-        --validation_file_pattern="/shared/data/nv_tfrecords/val*.tfrecord" \
-        --val_json_file="/shared/data/nv_tfrecords/annotations/instances_val2017.json" \
+	--training_file_pattern="/shared/data2/train*.tfrecord" \
+        --validation_file_pattern="/shared/data2/val*.tfrecord" \
+        --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --xla \
         --use_batched_nms \

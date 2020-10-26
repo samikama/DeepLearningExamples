@@ -22,6 +22,7 @@ from __future__ import division
 from __future__ import print_function
 from collections import deque
 import os
+import cProfile, pstats
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
@@ -31,6 +32,13 @@ from absl import app
 
 import tensorflow as tf
 from tensorflow.python.framework.ops import disable_eager_execution
+
+#from tensorflow.keras.mixed_precision import experimental as mixed_precision
+#policy = mixed_precision.Policy('mixed_float16')
+#mixed_precision.set_policy(policy)
+#Remeber to verify this runs on the OFFLOAD, Can run in Main file
+#tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
+#tf.config.optimizer.set_jit(True)
 
 from mask_rcnn.utils.logging_formatter import logging
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
@@ -76,7 +84,8 @@ from mask_rcnn.utils import coco_utils
 
 import h5py
 import time
-import multiprocessing
+import multiprocessing as mp
+
 
 
 
@@ -95,17 +104,30 @@ def get_latest_checkpoint(q, checkpoint_dir, model):
 def do_eval(run_config, train_input_fn, eval_input_fn):
 
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn, is_training=True)
-    mrcnn_model.initialize_model()
-
     q = deque()
     out_path = run_config.model_dir
     args=[q, out_path, mrcnn_model]
     eval_workers=min(32, MPI_size())
+    batches = []
+    total_samples = 0
+    while 1:
+      try:
+        batches.append(next(mrcnn_model.eval_tdf)['features'])
+        total_samples += batches[-1]['images'].shape[0]
+
+      except Exception as e:
+        #Should only break when out of data
+        break
+    steps = len(batches)
+    
+    mrcnn_model.initialize_eval_model(batches[0])
+   
     #if MPI_rank() == 0:
     chkpoint_thread = threading.Thread(target=get_latest_checkpoint, name="checkpoint thread", args=args)
     chkpoint_thread.start()
     last = None
     test = True
+    
     while True:
         if len(q) == 0 or q[0] == last:
             pass
@@ -114,8 +136,8 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
             q.popleft()
             print("#"*20, "Running eval for", last)
             mrcnn_model.load_model(os.path.join(run_config.model_dir,last))
-            mrcnn_model.run_eval(run_config.eval_samples//eval_workers, async_eval=run_config.async_eval,
-                     use_ext=run_config.use_ext)
+            mrcnn_model.run_eval(steps, batches, async_eval=run_config.async_eval,
+                    use_ext=run_config.use_ext, use_dist_coco_eval=run_config.dist_coco_eval)
         time.sleep(5)
 
 def main(argv):
@@ -126,6 +148,7 @@ def main(argv):
 
     temp_config = FLAGS.flag_values_dict()
     for i,j in temp_config.items():
+      if MPI_rank() == 0:
         print("{}: {}".format(i,j))
     temp_config['learning_rate_decay_levels'] = [float(decay) for decay in temp_config['learning_rate_decay_levels']]
     temp_config['learning_rate_levels'] = [

@@ -13,30 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-BATCH_SIZE=4
-HOST_COUNT=1
-GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
-IMAGES=118287
-GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
-STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
-FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
-SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
-TOTAL_STEPS=$(( 13 * STEP_PER_EPOCH ))
-LR_MULTIPLIER=0.001
-BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
-
 conda_path=/shared/sami/conda
 source $conda_path/etc/profile.d/conda.sh
 conda activate base
 
 
-
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-rm -rf $BASEDIR/../baseline_1x
-mkdir -p $BASEDIR/../baseline_1x
+PROFILE_PATH="--profile_path ${BASEDIR}/../Profiles/TapeSingleHost"
+
+rm -rf $BASEDIR/../results_tf2_32x_novo_$1
+mkdir -p $BASEDIR/../results_tf2_32x_novo_$1
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    -np $GPU_COUNT -H localhost:$GPU_COUNT \
+    --hostfile /shared/mzanur/hosts_8x \
+    -N 8 \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
@@ -44,26 +34,25 @@ mkdir -p $BASEDIR/../baseline_1x
     /shared/sami/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
 	--loop_mode="tape" \
-        --checkpoint="/shared/sami/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
-        --eval_samples=5000 \
-        --loop_mode="tape" \
 	--box_loss_type="giou" \
-        --log_interval=100 \
-        --init_learning_rate=$BASE_LR \
-        --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
-        --optimizer_type="SGD" \
-        --lr_schedule="piecewise" \
-        --model_dir="$BASEDIR/../baseline_1x" \
-        --num_steps_per_eval=$STEP_PER_EPOCH \
+        --checkpoint="/shared/sami/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+	--eval_samples=5000 \
+        --log_interval=10 \
+        --init_learning_rate=0.05 \
+        --optimizer_type="Novograd" \
+        --lr_schedule="cosine" \
+        --model_dir="$BASEDIR/../results_tf2_32x_novo_$1" \
+        --num_steps_per_eval=500 \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1000 \
-        --global_gradient_clip_ratio=0.0 \
-        --total_steps=$TOTAL_STEPS \
-        --l2_weight_decay=1e-4 \
-        --train_batch_size=$BATCH_SIZE \
+	--beta1=0.9 \
+	--beta2=0.5 \
+	--warmup_steps=200 \
+        --total_steps=200 \
+        --l2_weight_decay=1e-3 \
+        --train_batch_size=1 \
         --eval_batch_size=1 \
         --dist_eval \
-	--first_eval=1 \
+	--first_eval=15 \
         --training_file_pattern="/home/ubuntu/data2/train*.tfrecord" \
         --validation_file_pattern="/home/ubuntu/data2/val*.tfrecord" \
         --val_json_file="/home/ubuntu/data2/annotations/instances_val2017.json" \
@@ -71,4 +60,4 @@ mkdir -p $BASEDIR/../baseline_1x
         --use_batched_nms \
         --xla \
         --tf2 \
-        --use_custom_box_proposals_op | tee $BASEDIR/../baseline_1x/baseline_1x.log
+        --use_custom_box_proposals_op | tee $BASEDIR/../results_tf2_32x_novo_$1/train_eval.log
