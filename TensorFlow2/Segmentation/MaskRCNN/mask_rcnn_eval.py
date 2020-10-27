@@ -122,16 +122,7 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
         #Should only break when out of data
         break
     steps = len(batches)
-    print(total_samples)
-
-    print(len(set(img_ids)))
     
-    comm = MPI.COMM_WORLD
-    res = comm.gather(img_ids)
-    if(MPI_rank() == 0):
-      res = sum(res, [])
-      print("Total imgs ", len(set(res)))
-
     for ii in range(len(batches)):
       tmpdict = {}
       for key in batches[ii]:

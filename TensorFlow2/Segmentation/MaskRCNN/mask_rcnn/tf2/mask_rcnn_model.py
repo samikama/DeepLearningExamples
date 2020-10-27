@@ -1176,7 +1176,6 @@ class TapeModel(object):
         post_proc.join()
         post_proc2.join()
         post_proc3.join()
-        print("Q is empty ", in_q.empty())
         #if MPI_rank(is_herring())==0:
         #  tf.profiler.experimental.stop()
 
@@ -1265,7 +1264,6 @@ def coco_pre_process(in_q, out_q, finish_input):
           total_preproc += end_coco_load - start
         except queue.Empty:
           pass
-      print(not in_q.empty(), "Converted preds in mp ",len(converted_predictions), " ", total_batches_processed, flush=True)
       out_q.put(converted_predictions)
       #print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
       return
