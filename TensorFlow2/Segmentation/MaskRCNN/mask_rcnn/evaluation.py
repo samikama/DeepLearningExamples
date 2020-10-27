@@ -336,7 +336,8 @@ def gather_result_from_all_processes(local_results, root=0):
   size = comm.Get_size()
   print(len(local_results), flush=True)
   res = comm.gather(local_results, root=0)
-  
+  if(rank == 0):
+    res = sum(res, [])
   return res
 
 def evaluate(eval_estimator,
@@ -663,10 +664,7 @@ def coco_mask_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     print(f"Prepocessing mask {preproc_end - start} coco c++ ext {time.time() - preproc_end}")
 
 def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
-    import pickle
-    with open("/tmp/coco_eval_b12", 'wb') as fp:
-      pickle.dump(predictions, fp)
-
+    
     imgIds = []
     box_predictions = np.empty((len(predictions), 7))
     for ii, prediction in enumerate(predictions):

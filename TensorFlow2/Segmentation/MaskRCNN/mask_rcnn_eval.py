@@ -110,17 +110,27 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
     eval_workers=min(32, MPI_size())
     batches = []
     total_samples = 0
+    img_ids = []
     while 1:
       try:
         batches.append(next(mrcnn_model.eval_tdf)['features'])
         total_samples += batches[-1]['images'].shape[0]
         #print(batches[-1]['images'].shape[0])
+        img_ids += list(batches[-1]['source_ids'].numpy().flatten())
 
       except Exception as e:
         #Should only break when out of data
         break
     steps = len(batches)
     print(total_samples)
+
+    print(len(set(img_ids)))
+    
+    comm = MPI.COMM_WORLD
+    res = comm.gather(img_ids)
+    if(MPI_rank() == 0):
+      res = sum(res, [])
+      print("Total imgs ", len(set(res)))
 
     for ii in range(len(batches)):
       tmpdict = {}

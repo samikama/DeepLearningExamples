@@ -33,7 +33,7 @@ from mpi4py import MPI
 from tqdm import tqdm
 import os
 
-import multiprocessing as mp
+import multiprocessing.dummy as mp
 import queue
 #mp.set_start_method('spawn')
 
@@ -1166,7 +1166,11 @@ class TapeModel(object):
             for key in out:
               out[key] = out[key].numpy()
             in_q.put(out)
+        while(in_q.qsize() > 0):
+          time.sleep(.5)
         stop_event.set()
+        while(out_q.qsize() < 3):
+          time.sleep(.5)
         #Should expect num threads items in queue
         converted_predictions = out_q.get() + out_q.get() + out_q.get()
         post_proc.join()
@@ -1187,10 +1191,7 @@ class TapeModel(object):
           end_gather_result = time.time()
           #with cProfile.Profile() as pr:
           if MPI_rank(is_herring()) == 0:
-              all_predictions = []
-              for i, p in enumerate(predictions_list):
-                  if i < 32:
-                      all_predictions.extend(p)
+              all_predictions = predictions_list
               print(len(all_predictions), flush=True)
               if use_ext:
                   args = [all_predictions, validation_json_file, use_ext, False]
@@ -1227,10 +1228,11 @@ def coco_pre_process(in_q, out_q, finish_input):
       total_preproc = 0
       preproc_cnt = 0
       total_batches_processed = 0
-      while(not finish_input.is_set()):
+      while(not finish_input.is_set() or in_q.qsize() > 0):
         try:
-          out = in_q.get(timeout=0.5)
           start = time.time()
+          out = in_q.get(timeout=0.5)
+          start_q = time.time()
           preproc_cnt +=1
           worker_predictions = {}
           total_batches_processed += len(out['detection_scores'])
