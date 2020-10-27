@@ -322,6 +322,8 @@ class MRCNN(tf.keras.Model):
         
         # Performs multi-level RoIAlign.
         if params["use_default_roi_align"]:
+            
+            print("#"*100, "using default roi align")
             box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
                 features=fpn_feats,
                 boxes=rpn_box_rois,
@@ -329,10 +331,10 @@ class MRCNN(tf.keras.Model):
                 is_gpu_inference=is_gpu_inference
             )
         else:
-
+            print("#"*100, "using custom roi align")
             box_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
-            features=fpn_feats_0,
-            boxes=rpn_box_rois_0,
+            features=fpn_feats,
+            boxes=rpn_box_rois,
             output_size=7,
             is_gpu_inference=is_gpu_inference,
             is_transposed=params['transpose_roi_align']
@@ -420,11 +422,11 @@ class MRCNN(tf.keras.Model):
             )
         else:
             mask_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
-                features=fpn_feats_0,
-                boxes=selected_box_rois_0,
+                features=fpn_feats,
+                boxes=selected_box_rois,
                 output_size=14,
                 is_gpu_inference=is_gpu_inference,
-                is_transposed=params['transposed_roi_align']
+                is_transposed=params['transpose_roi_align']
             )
         
         mask_outputs = self.mask_head(inputs=mask_roi_features, class_indices=class_indices)
