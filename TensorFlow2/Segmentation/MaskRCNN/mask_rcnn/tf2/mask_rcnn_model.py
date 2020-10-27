@@ -33,7 +33,7 @@ from mpi4py import MPI
 from tqdm import tqdm
 import os
 
-import multiprocessing as mp
+import multiprocessing.dummy as mp
 import queue
 #mp.set_start_method('spawn')
 
@@ -1205,20 +1205,24 @@ class TapeModel(object):
             features = batches[i]#next(self.eval_tdf)['features']
             data_load_time = time.time()
             data_load_total += data_load_time-start
+            
             out = self.predict(features)
             predict_time = time.time()
             predict_total += predict_time - data_load_time
             #Extract numpy from tensors
             for key in out:
               out[key] = out[key].numpy()
-            in_q.put(out, False)
+            in_q.put(out)
+        while(in_q.qsize() > 0):
+          time.sleep(.5)
         stop_event.set()
+        while(out_q.qsize() < 3):
+          time.sleep(.5)
         #Should expect num threads items in queue
         converted_predictions = out_q.get() + out_q.get() + out_q.get()
         post_proc.join()
         post_proc2.join()
         post_proc3.join()
-
         #if MPI_rank(is_herring())==0:
         #  tf.profiler.experimental.stop()
 
@@ -1226,17 +1230,15 @@ class TapeModel(object):
         end_total_infer = time.time()
         MPI.COMM_WORLD.barrier()
         if(not use_dist_coco_eval):
-          
+          print(len(converted_predictions), flush=True)
           predictions_list = evaluation.gather_result_from_all_processes(converted_predictions)
           
           validation_json_file=self.params.val_json_file
           end_gather_result = time.time()
           #with cProfile.Profile() as pr:
           if MPI_rank(is_herring()) == 0:
-              all_predictions = []
-              for i, p in enumerate(predictions_list):
-                  if i < 32:
-                      all_predictions.extend(p)
+              all_predictions = predictions_list
+              print(len(all_predictions), flush=True)
               if use_ext:
                   args = [all_predictions, validation_json_file, use_ext, False]
                   if async_eval:
@@ -1271,16 +1273,15 @@ def coco_pre_process(in_q, out_q, finish_input):
       converted_predictions = []
       total_preproc = 0
       preproc_cnt = 0
-      while(not finish_input.is_set() or not in_q.empty()):
-        if(not in_q.empty()):
+      total_batches_processed = 0
+      while(not finish_input.is_set() or in_q.qsize() > 0):
+        try:
           start = time.time()
+          out = in_q.get(timeout=0.5)
+          start_q = time.time()
           preproc_cnt +=1
           worker_predictions = {}
-          try:
-            out = in_q.get(False)
-          except queue.Empty:
-            continue
-
+          total_batches_processed += len(out['detection_scores'])
           out = evaluation.process_prediction_for_eval_batch(out)
           for k, v in out.items():
               if k not in worker_predictions:
@@ -1289,7 +1290,7 @@ def coco_pre_process(in_q, out_q, finish_input):
                   worker_predictions[k].append(v)
           for k, v in worker_predictions.items():
               worker_predictions[k] = np.concatenate(v, axis=0)
-          
+          #print(len(worker_predictions), flush=True)
           # score_threshold = .2
           # print(out['detection_scores'].shape, flush=True)
           
@@ -1308,6 +1309,8 @@ def coco_pre_process(in_q, out_q, finish_input):
           converted_predictions += coco.load_predictions(worker_predictions, include_mask=True, is_image_mask=False)
           end_coco_load = time.time()
           total_preproc += end_coco_load - start
+        except queue.Empty:
+          pass
       out_q.put(converted_predictions)
       #print(f"Time taken to process outputs {total_preproc/preproc_cnt}/{total_preproc}")
       return

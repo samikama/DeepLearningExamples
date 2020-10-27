@@ -141,30 +141,33 @@ class InputReader(object):
 
             except NameError:  # Not a distributed training setup
                 pass
-        elif do_dist_eval and (self._mode == tf.estimator.ModeKeys.PREDICT or self._mode == tf.estimator.ModeKeys.EVAL):
-            # 32 validation tf records - distribute on upto 32 workers
-            if MPI_is_distributed():
-                logging.info("Using Evaluation Dataset Sharding with Horovod")
-                _shard_idx, _num_shards = MPI_rank_and_size()
-                max_shards = min(_num_shards, 32)
-                try:
-                    dataset = dataset.shard(
-                        num_shards=max_shards,
-                        index=_shard_idx % max_shards
-                    )
-                except NameError:  # Not a distributed training setup
-                    pass
+        # elif do_dist_eval and (self._mode == tf.estimator.ModeKeys.PREDICT or self._mode == tf.estimator.ModeKeys.EVAL):
+        #     # 32 validation tf records - distribute on upto 32 workers
+        #     if MPI_is_distributed():
+        #         logging.info("Using Evaluation Dataset Sharding with Horovod")
+        #         _shard_idx, _num_shards = MPI_rank_and_size()
+        #         max_shards = min(_num_shards, 32)
+        #         try:
+        #             dataset = dataset.shard(
+        #                 num_shards=max_shards,
+        #                 index=_shard_idx % max_shards
+        #             )
+        #         except NameError:  # Not a distributed training setup
+        #             pass
         
 
         def _prefetch_dataset(filename):
             return tf.data.TFRecordDataset(filename).prefetch(1)
 
-        dataset = dataset.interleave(
-            map_func=_prefetch_dataset,
-            cycle_length=32,
-            block_length=64,
-            num_parallel_calls=tf.data.experimental.AUTOTUNE,
-        )
+        if do_dist_eval and (self._mode == tf.estimator.ModeKeys.PREDICT or self._mode == tf.estimator.ModeKeys.EVAL):
+          dataset = dataset.flat_map(_prefetch_dataset)
+        elif self._mode == tf.estimator.ModeKeys.TRAIN:
+          dataset = dataset.interleave(
+              map_func=_prefetch_dataset,
+              cycle_length=32,
+              block_length=64,
+              num_parallel_calls=tf.data.experimental.AUTOTUNE,
+          )
 
         if self._num_examples is not None and self._num_examples > 0:
             logging.info("[*] Limiting the amount of sample to: %d" % self._num_examples)
@@ -179,6 +182,19 @@ class InputReader(object):
             )
 
             dataset = dataset.repeat()
+        if do_dist_eval and (self._mode == tf.estimator.ModeKeys.PREDICT or self._mode == tf.estimator.ModeKeys.EVAL):
+            # 32 validation tf records - distribute on upto 32 workers
+            if MPI_is_distributed():
+                logging.info("Using Evaluation Dataset Sharding with Horovod")
+                _shard_idx, _num_shards = MPI_rank_and_size()
+                #max_shards = min(_num_shards, 32)
+                try:
+                    dataset = dataset.shard(
+                        num_shards=_num_shards,
+                        index=_shard_idx % _num_shards
+                    )
+                except NameError:  # Not a distributed training setup
+                    pass
 
         # Parse the fetched records to input tensors for model function.
         dataset = dataset.map(

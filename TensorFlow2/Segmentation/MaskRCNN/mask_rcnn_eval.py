@@ -110,15 +110,27 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
     eval_workers=min(32, MPI_size())
     batches = []
     total_samples = 0
+    img_ids = []
     while 1:
       try:
         batches.append(next(mrcnn_model.eval_tdf)['features'])
         total_samples += batches[-1]['images'].shape[0]
+        #print(batches[-1]['images'].shape[0])
+        img_ids += list(batches[-1]['source_ids'].numpy().flatten())
 
       except Exception as e:
         #Should only break when out of data
         break
     steps = len(batches)
+    
+    for ii in range(len(batches)):
+      tmpdict = {}
+      for key in batches[ii]:
+        tmpdict[key] = batches[ii][key].numpy()
+      batches[ii] = tmpdict
+    # import pickle
+    # with open("/tmp/input_b37", 'wb') as fp:
+    #   pickle.dump(batches, fp)
     
     mrcnn_model.initialize_eval_model(batches[0])
    

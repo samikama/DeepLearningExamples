@@ -334,8 +334,10 @@ def gather_result_from_all_processes(local_results, root=0):
   comm = MPI.COMM_WORLD
   rank = comm.Get_rank()
   size = comm.Get_size()
+  print(len(local_results), flush=True)
   res = comm.gather(local_results, root=0)
-  
+  if(rank == 0):
+    res = sum(res, [])
   return res
 
 def evaluate(eval_estimator,
@@ -662,25 +664,19 @@ def coco_mask_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     print(f"Prepocessing mask {preproc_end - start} coco c++ ext {time.time() - preproc_end}")
 
 def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
-    #import pickle
-    #with open("/tmp/coco_data", 'wb') as fp:
-    #  pickle.dump(predictions, fp)
-
+    
     imgIds = []
-    catIds = []
     box_predictions = np.empty((len(predictions), 7))
     for ii, prediction in enumerate(predictions):
       imgIds.append(prediction['image_id'])
-      catIds.append(prediction['category_id'])
       box_predictions[ii,0] = prediction['image_id']
       box_predictions[ii,1:5] = prediction['bbox'][:4] 
       box_predictions[ii, 5:]= [float(prediction['score']), prediction['category_id']]
       del prediction['bbox']
 
     imgIds = list(set(imgIds))
-    catIds = list(set(catIds))
-    print(use_ext, use_dist_coco_eval, len(imgIds), len(predictions), len(catIds))
 
+    
     #BBox
     cocoGt = COCO(annotation_file=annotations_file, use_ext=use_ext)
     cocoDt = cocoGt.loadRes(box_predictions, use_ext=use_ext)
