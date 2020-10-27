@@ -17,7 +17,7 @@
 # as specified in hosts file
 
 BATCH_SIZE=1
-HOST_COUNT=`wc -l < ./hostfile`
+HOST_COUNT=`wc -l < /shared/sboshin/eval_hosts`
 GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
@@ -31,17 +31,17 @@ BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output -v --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile ./hostfile \
+    --hostfile /shared/sboshin/eval_hosts \
     -N 8 \
     -x NCCL_DEBUG=VERSION \
-    -x LD_LIBRARY_PATH=/shared/conda/pkgs/cuda-toolkit/extras/CUPTI/lib64/:$LD_LIBRARY_PATH \
+    -x LD_LIBRARY_PATH=/usr/local/cuda-10.1/lib64:/shared/conda/pkgs/cuda-toolkit/extras/CUPTI/lib64/:$LD_LIBRARY_PATH \
     -x PATH \
     -x RDMAV_FORK_SAFE=1 \
     -x LD_PRELOAD= \
     --bind-to none \
     --oversubscribe \
     bash launcher.sh \
-    /shared/conda/bin/python ${BASEDIR}/../mask_rcnn_eval.py \
+    /shared/sboshin/conda/bin/python ${BASEDIR}/../mask_rcnn_eval.py \
         --mode="train_and_eval" \
         --checkpoint="/home/ubuntu/sboshin/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
@@ -59,11 +59,11 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
         --train_batch_size=$BATCH_SIZE \
-        --eval_batch_size=12 \
+        --eval_batch_size=1 \
         --dist_eval \
-        --training_file_pattern="/shared/data/train*.tfrecord" \
-        --validation_file_pattern="/shared/data/val*.tfrecord" \
-        --val_json_file="/shared/data/nv_tfrecords/annotations/instances_val2017.json" \
+        --training_file_pattern="/shared/data2/train*.tfrecord" \
+        --validation_file_pattern="/shared/data2/val*.tfrecord" \
+        --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --xla \
         --use_batched_nms \
