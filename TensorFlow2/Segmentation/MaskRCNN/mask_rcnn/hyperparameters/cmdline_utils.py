@@ -104,7 +104,7 @@ def define_hparams_flags():
         help='Use default ROIAlign implementation.'
     )    
     flags.DEFINE_bool(
-        'transposed_roi_align',
+        'transpose_roi_align',
         default=True,
         help='Transpose ROI align. Default is NHWC'
     )    
