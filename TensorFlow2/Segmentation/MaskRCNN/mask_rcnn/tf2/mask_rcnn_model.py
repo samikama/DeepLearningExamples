@@ -32,11 +32,11 @@ from math import ceil
 from mpi4py import MPI
 from tqdm import tqdm
 import os
-
+from pathlib import Path
 import multiprocessing.dummy as mp
 import queue
 #mp.set_start_method('spawn')
-
+import sys
 import h5py
 import tensorflow as tf
 import tensorflow_addons as tfa
@@ -349,7 +349,6 @@ class MRCNN(tf.keras.Model):
         # Performs multi-level RoIAlign.
         if params["use_default_roi_align"]:
             
-            print("#"*100, "using default roi align")
             box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
                 features=fpn_feats,
                 boxes=rpn_box_rois,
@@ -357,7 +356,6 @@ class MRCNN(tf.keras.Model):
                 is_gpu_inference=is_gpu_inference
             )
         else:
-            print("#"*100, "using custom roi align")
             box_roi_features = spatial_transform_ops.custom_multilevel_crop_and_resize(
             features=fpn_feats,
             boxes=rpn_box_rois,
@@ -911,7 +909,24 @@ class TapeModel(object):
                             if eval_input_fn else None
         self.optimizer, self.schedule = self.get_optimizer()
         self.epoch_num = 0
+        self.st = 0
 
+        if MPI_rank() == 0 and self.params.mode == "train_and_eval":
+            print("#"*20, "starting thread")
+            converge_thread = threading.Thread(target=self.convergence_checker,
+                                            name="convergence_checker_thread")
+            converge_thread.start()
+
+
+    def convergence_checker(self):
+        my_file = Path("/shared/rejin/converged")
+        while True:
+            if my_file.is_file():
+                print("Convergence reached.")
+                print(f'Time taken is: {time.time() - self.st}')
+                sys.exit(0)
+            time.sleep(1)
+                
     def load_weights(self):
         chkp = tf.compat.v1.train.NewCheckpointReader(self.params.checkpoint)
         weights = [chkp.get_tensor(i) for i in eager_mapping.resnet_vars]
@@ -1079,7 +1094,6 @@ class TapeModel(object):
         else:
             p_bar = range(steps)
         times=[]
-        global st
         if MPI_rank(is_herring())==0 and profile is not None:
             logging.info(f"Saving profile to {profile}")
             tf_profiler.start(profile)
@@ -1108,7 +1122,7 @@ class TapeModel(object):
             runtype="TrainStep"
             for i in p_bar:
                 if i == 5 and self.epoch_num == 0:
-                    st = time.time()
+                    self.st = time.time()
                 if broadcast and i==0:
                     b_w, b_o = True, True
                 elif i==0:
@@ -1134,7 +1148,7 @@ class TapeModel(object):
         logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[500:])*1000.} +/- {np.std(times[500:])*1000.} ms")
         if MPI_rank(is_herring()) == 0:
             if self.epoch_num == 16:
-                print(f'Total time is {time.time() - st}')
+                print(f'Total time is {time.time() - self.st}')
             #print(f'average step time={np.mean(timings[10:])} +/- {np.std(timings[10:])}')
             print("Saving checkpoint...")
             self.epoch_num+=1
@@ -1238,7 +1252,7 @@ class TapeModel(object):
           #with cProfile.Profile() as pr:
           if MPI_rank(is_herring()) == 0:
               all_predictions = predictions_list
-              print(len(all_predictions), flush=True)
+              #print(len(all_predictions), flush=True)
               if use_ext:
                   args = [all_predictions, validation_json_file, use_ext, False]
                   if async_eval:
@@ -1258,10 +1272,14 @@ class TapeModel(object):
         else:
           end_gather_result = time.time()
           validation_json_file=self.params.val_json_file
-          evaluation.fast_eval(converted_predictions, validation_json_file, use_ext, use_dist_coco_eval)
+          bbox_score, mask_score = evaluation.fast_eval(converted_predictions, validation_json_file, use_ext, use_dist_coco_eval)
 
+    
         end_coco_eval = time.time()
         if(MPI_rank(is_herring()) == 0):
+          if bbox_score > 0.377 and mask_score > 0.339:
+            print("#"*20, "CONVERGED")
+            open('/shared/rejin/converged', 'a').close()
           print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
           print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
 

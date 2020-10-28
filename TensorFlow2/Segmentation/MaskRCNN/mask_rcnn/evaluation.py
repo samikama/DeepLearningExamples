@@ -692,11 +692,15 @@ def fast_eval(predictions, annotations_file, use_ext, use_dist_coco_eval):
     if(MPI_rank() == 0):
       cocoEval.accumulate()
       scocoEval.accumulate()
-      logging.info("Bbox Summary")
-      cocoEval.summarize()
-      logging.info("Segm Summary")
-      scocoEval.summarize()
+      #logging.info("Bbox Summary")
+      bbox_score = cocoEval.summarize()
+      #logging.info("Segm Summary")
+      segm_score = scocoEval.summarize()
       
-    
-    return
+      #print("#"*20, bbox_score)
+      #print("#"*20, segm_score)
+    else:
+        bbox_score = 0
+        segm_score = 0
+    return bbox_score, segm_score
   

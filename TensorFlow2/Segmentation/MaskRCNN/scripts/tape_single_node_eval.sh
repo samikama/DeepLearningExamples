@@ -13,39 +13,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Batch size per gpu 4 on arbitrary number of nodes
-# as specified in hosts file
-
-BATCH_SIZE=1
-HOST_COUNT=`wc -l < /shared/sboshin/eval_hosts`
-GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
+BATCH_SIZE=4
+HOST_COUNT=1
+#GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
+GPU_COUNT=8
 IMAGES=118287
 GLOBAL_BATCH_SIZE=$((BATCH_SIZE * HOST_COUNT * GPU_COUNT))
 STEP_PER_EPOCH=$(( IMAGES / GLOBAL_BATCH_SIZE ))
-FIRST_DECAY=$(( 9 * STEP_PER_EPOCH ))
-SECOND_DECAY=$(( 12 * STEP_PER_EPOCH ))
-TOTAL_STEPS=$(( 15 * STEP_PER_EPOCH ))
+FIRST_DECAY=$(( 8 * STEP_PER_EPOCH ))
+SECOND_DECAY=$(( 11 * STEP_PER_EPOCH ))
+TOTAL_STEPS=$(( 13 * STEP_PER_EPOCH ))
 LR_MULTIPLIER=0.001
 BASE_LR=$(echo $GLOBAL_BATCH_SIZE*$LR_MULTIPLIER | bc)
 
+
+
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output -v --mca plm_rsh_no_tree_spawn 1 \
+rm -rf $BASEDIR/../baseline_1x
+mkdir -p $BASEDIR/../baseline_1x
+/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile /shared/sboshin/eval_hosts \
+    --hostfile /shared/rejin/hosts_4x \
+    -x RDMAV_FORK_SAFE=1 \
     -N 8 \
     -x NCCL_DEBUG=VERSION \
-    -x LD_LIBRARY_PATH=/usr/local/cuda-10.1/lib64:/shared/conda/pkgs/cuda-toolkit/extras/CUPTI/lib64/:$LD_LIBRARY_PATH \
+    -x LD_LIBRARY_PATH \
     -x PATH \
-    -x HDF5_USE_FILE_LOCKING='FALSE' \
-    -x RDMAV_FORK_SAFE=1 \
-    -x LD_PRELOAD= \
-    -x FI_PROVIDER="efa" \
-    --bind-to none \
     --oversubscribe \
     bash launcher.sh \
-    /shared/rejin/conda/bin/python ${BASEDIR}/../mask_rcnn_eval.py \
-        --mode="eval" \
-        --checkpoint="/home/ubuntu/sboshin/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+    /shared/rejin/conda/bin/python ${BASEDIR}/test_eval.py \
+        --mode="train_and_eval" \
+        --checkpoint="/shared/rejin/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --loop_mode="tape" \
         --log_interval=100 \
@@ -53,11 +51,11 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --learning_rate_steps="$FIRST_DECAY,$SECOND_DECAY" \
         --optimizer_type="SGD" \
         --lr_schedule="piecewise" \
-        --model_dir="/shared/rejin/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_tf2_64x_novo_/" \
+	--model_dir="/shared/sboshin/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/results_tape_1x/" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=1500 \
-        --global_gradient_clip_ratio=5.0 \
+        --warmup_steps=1000 \
+        --global_gradient_clip_ratio=0.0 \
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
         --train_batch_size=$BATCH_SIZE \
@@ -67,9 +65,8 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --validation_file_pattern="/shared/data2/val*.tfrecord" \
         --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
-        --xla \
         --use_batched_nms \
+        --xla \
+        --tf2 \
         --use_ext \
-        --use_custom_box_proposals_op \
-        --dist_coco_eval
-
+        --use_custom_box_proposals_op | tee $BASEDIR/../baseline_1x/baseline_1x.log
