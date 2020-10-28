@@ -25,19 +25,20 @@ import os
 
 import subprocess
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'  # or any {'0', '1', '2'}
 os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
 os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
 os.environ['TF_GPU_THREAD_COUNT'] = '1'
 os.environ["TF_NUM_INTRAOP_THREADS"]="7"
 os.environ["TF_NUM_INTEROP_THREADS"]="6"
-
+os.environ["ENABLE_NVTX_MARKERS"]="0"
 
 from absl import app
 
 import tensorflow as tf
-from tensorflow.python.framework.ops import disable_eager_execution
+#from tensorflow.python.framework.ops import disable_eager_execution
+#tf.config.run_functions_eagerly(True)
 from mask_rcnn.utils.herring_env import is_herring
 
 if is_herring():

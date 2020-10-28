@@ -42,7 +42,8 @@ then
     rm -rf ${BASEDIR}/../baseline_1x_tape
     mkdir -p ${BASEDIR}/../baseline_1x_tape
 fi
-/opt/amazon/openmpi/bin/mpirun --tag-output --mca plm_rsh_no_tree_spawn 1 \
+/opt/amazon/openmpi/bin/mpirun  --tag-output  \
+    --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
     -np ${NUM_GPUS} -H localhost:${NUM_GPUS} \
     -x NCCL_DEBUG=VERSION \
