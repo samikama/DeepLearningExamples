@@ -53,7 +53,6 @@ from mask_rcnn.hyperparameters import mask_rcnn_params
 from mask_rcnn.hyperparameters import params_io
 from mask_rcnn.tf2.mask_rcnn_model import TapeModel
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
-
 from mask_rcnn.utils.logging_formatter import log_cleaning
 import dllogger
 
@@ -146,11 +145,14 @@ def do_eval(run_config, train_input_fn, eval_input_fn):
         if len(q) !=0 and q[0] != last:
             last = q[0]
             q.popleft()
-            print("#"*20, "Running eval for", last)
+            
+            if MPI_rank() == 0:
+                print("#"*20, "Running eval for", last)
+            time.sleep(1)
             mrcnn_model.load_model(os.path.join(run_config.model_dir,last))
             mrcnn_model.run_eval(steps, batches, async_eval=run_config.async_eval,
                     use_ext=run_config.use_ext, use_dist_coco_eval=run_config.dist_coco_eval)
-        time.sleep(5)
+        time.sleep(1)
 
 def main(argv):
     del argv  # Unused.

@@ -48,15 +48,9 @@ from mask_rcnn.utils.herring_env import is_herring
 
 #os.environ['CUDA_VISIBLE_DEVICES'] =  str(os.environ.get("OMPI_COMM_WORLD_LOCAL_RANK"))
 
-print(os.environ['CUDA_VISIBLE_DEVICES'])
 if is_herring():
     import herring.tensorflow as herring
     herring.init()
-from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_local_rank, MPI_is_distributed
-
-
-#os.environ['CUDA_VISIBLE_DEVICES'] = str(MPI_local_rank(is_herring()))
-
     from mask_rcnn.utils.distributed_utils_herring import MPI_rank, MPI_is_distributed
 else:
     from mpi4py import MPI

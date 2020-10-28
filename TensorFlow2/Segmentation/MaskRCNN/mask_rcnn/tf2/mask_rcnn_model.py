@@ -912,14 +912,13 @@ class TapeModel(object):
         self.st = 0
 
         if MPI_rank() == 0 and self.params.mode == "train_and_eval":
-            print("#"*20, "starting thread")
             converge_thread = threading.Thread(target=self.convergence_checker,
                                             name="convergence_checker_thread")
             converge_thread.start()
 
 
     def convergence_checker(self):
-        my_file = Path("/shared/rejin/converged")
+        my_file = Path("/shared/converged")
         while True:
             if my_file.is_file():
                 print("Convergence reached.")
@@ -1279,7 +1278,7 @@ class TapeModel(object):
         if(MPI_rank(is_herring()) == 0):
           if bbox_score > 0.377 and mask_score > 0.339:
             print("#"*20, "CONVERGED")
-            open('/shared/rejin/converged', 'a').close()
+            open('/shared/converged', 'a').close()
           print(f"(avg, total) DataLoad ({data_load_total/steps}, {data_load_total}) predict ({predict_total/steps}, {predict_total})")
           print(f"Total Time {end_coco_eval-start_total_infer} Total Infer {end_total_infer - start_total_infer} gather res {end_gather_result - end_total_infer} coco_eval {end_coco_eval - end_gather_result}")
 
