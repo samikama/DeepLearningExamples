@@ -25,8 +25,8 @@ import os
 
 import subprocess
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
-os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_op=0,executor=0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'  # or any {'0', '1', '2'}
+# os.environ["TF_CPP_VMODULE"] = 'compilation_cache=2,gpu_backend_lib=2,nvptx_compiler=2,xla_compile_on_demand_op=2'
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
 os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
 os.environ['TF_GPU_THREAD_COUNT'] = '1'
@@ -76,7 +76,7 @@ from mask_rcnn.hyperparameters import params_io
 from mask_rcnn.hyperparameters.cmdline_utils import define_hparams_flags
 
 from mask_rcnn.utils.logging_formatter import log_cleaning
-import dllogger
+# import dllogger
 
 FLAGS = define_hparams_flags()
 
@@ -154,8 +154,8 @@ def main(argv):
         if not RUN_CONFIG.include_groundtruth_in_features and not os.path.isfile(RUN_CONFIG.val_json_file):
             raise FileNotFoundError("Validation JSON File not found: %s" % RUN_CONFIG.val_json_file)
 
-    dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
-                                                           filename=RUN_CONFIG.log_path)])
+    # dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
+    #                                                        filename=RUN_CONFIG.log_path)])
 
     if RUN_CONFIG.mode in ('train', 'train_and_eval'):
         

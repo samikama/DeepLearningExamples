@@ -71,6 +71,7 @@ from mask_rcnn.utils.metric_tracking import register_metric
 from mask_rcnn.utils.herring_env import is_herring
 from tensorflow.python.profiler import profiler_v2 as tf_profiler
 from tensorflow.python.profiler.trace import Trace as prof_Trace
+
 try:
     from tensorflow.python import _pywrap_nvtx as nvtx
 except ImportError:
@@ -242,7 +243,31 @@ def compute_model_statistics(batch_size, is_training=True):
         "Training" if is_training else "Inference",
         flops_per_image/1e9
     ))
-    
+
+def gen_log_prefix():
+  """Assemble a logline prefix using the google2 format."""
+  # pylint: disable=global-variable-not-assigned
+  # pylint: enable=global-variable-not-assigned
+
+  # Record current time
+  now = time.time()
+  now_tuple = time.localtime(now)
+  now_microsecond = int(1e6 * (now % 1.0))
+
+  # Severity string
+  severity = 'I'
+
+  s = '%c%02d/%02d %02d:%02d:%02d.%06d ] ' % (
+      severity,
+      now_tuple[1],  # month
+      now_tuple[2],  # day
+      now_tuple[3],  # hour
+      now_tuple[4],  # min
+      now_tuple[5],  # sec
+      now_microsecond)
+
+  return s
+   
 class MRCNN(tf.keras.Model):
     
     def __init__(self, params, is_training=True, **kwargs):
@@ -963,7 +988,7 @@ class TapeModel(object):
 
 
     @tf.function
-    def train_step(self, features, labels, sync_weights=False, sync_opt=False):
+    def train_step(self, features, labels, sync_weights=False, sync_opt=False,sw=None,so=None):
         loss_dict = dict()
         with tf.GradientTape() as tape:
             model_outputs = self.forward(features, labels, self.params.values(), True)
@@ -1078,8 +1103,30 @@ class TapeModel(object):
     
     def initialize_model(self):
         features, labels = next(self.train_tdf)
-        model_outputs = self.forward(features, labels, self.params.values(), True)
+        tf.get_logger().info(f"{gen_log_prefix()} img_id= {features['source_ids'].numpy()[0]} (init_model) synch_weights={True}, sync_opt={True}")
+        model_outputs = self.train_step(features, labels,tf.convert_to_tensor(True), tf.convert_to_tensor(True),True,True)
+        features, labels = next(self.train_tdf)
+        tf.get_logger().info(f"{gen_log_prefix()} img_id= {features['source_ids'].numpy()[0]} (init_model) synch_weights={True}, sync_opt={False}")
+        model_outputs = self.train_step(features, labels,tf.convert_to_tensor(True), tf.convert_to_tensor(False),True,True)
+        features, labels = next(self.train_tdf)
+        tf.get_logger().info(f"{gen_log_prefix()} img_id= {features['source_ids'].numpy()[0]} (init_model) synch_weights={False}, sync_opt={False}")
+        model_outputs = self.train_step(features, labels,tf.convert_to_tensor(False), tf.convert_to_tensor(False),True,True)
+        features, labels = next(self.train_tdf)
+        tf.get_logger().info(f"{gen_log_prefix()} img_id= {features['source_ids'].numpy()[0]} (init_model) synch_weights={True}, sync_opt={True}")
+        model_outputs = self.train_step(features, labels,tf.convert_to_tensor(True), tf.convert_to_tensor(True),True,True)
+
         self.load_weights()
+        tf.get_logger().info(f"{gen_log_prefix()} img_id= {features['source_ids'].numpy()[0]} (init_model) synch_weights={True}, sync_opt={True}")
+        model_outputs = self.train_step(features, labels,tf.convert_to_tensor(True), tf.convert_to_tensor(True),True,True)
+        features, labels = next(self.train_tdf)
+        tf.get_logger().info(f"{gen_log_prefix()} img_id= {features['source_ids'].numpy()[0]} (init_model) synch_weights={True}, sync_opt={False}")
+        model_outputs = self.train_step(features, labels,tf.convert_to_tensor(True), tf.convert_to_tensor(False),True,True)
+        features, labels = next(self.train_tdf)
+        tf.get_logger().info(f"{gen_log_prefix()} img_id= {features['source_ids'].numpy()[0]} (init_model) synch_weights={False}, sync_opt={False}")
+        model_outputs = self.train_step(features, labels,tf.convert_to_tensor(False), tf.convert_to_tensor(False),True,True)
+        features, labels = next(self.train_tdf)
+        tf.get_logger().info(f"{gen_log_prefix()} img_id= {features['source_ids'].numpy()[0]} (init_model) synch_weights={True}, sync_opt={True}")
+        model_outputs = self.train_step(features, labels,tf.convert_to_tensor(True), tf.convert_to_tensor(True),True,True)
     
     def initialize_eval_model(self, features):
         for _ in range(5):
@@ -1092,6 +1139,8 @@ class TapeModel(object):
             loss_history = []
         else:
             p_bar = range(steps)
+        p_bar=range(steps)
+        logger=tf.get_logger()
         times=[]
         if MPI_rank(is_herring())==0 and profile is not None:
             logging.info(f"Saving profile to {profile}")
@@ -1131,16 +1180,18 @@ class TapeModel(object):
                 tstart=time.perf_counter()
                 step_token=nvtx.push(f"{runtype}-{i}",runtype)
                 features, labels = next(self.train_tdf)
-                b_w = tf.convert_to_tensor(b_w)
-                b_o = tf.convert_to_tensor(b_o)
-                loss_dict = self.train_step(features, labels, b_w, b_o)
+                b_wt = tf.convert_to_tensor(b_w)
+                b_ot = tf.convert_to_tensor(b_o)
+                tf.get_logger().info(f"{gen_log_prefix()} step={i} img_id= {features['source_ids'].numpy()[0]} synch_weights={b_w}, sync_opt={b_o}")
+                loss_dict = self.train_step(features, labels, b_wt, b_ot,b_w,b_o)
                 times.append(time.perf_counter()-tstart)
                 nvtx.pop(step_token)
-                if MPI_rank(is_herring())==0:
+                if MPI_rank(is_herring())==0 :
                     loss_history.append(loss_dict['total_loss'].numpy())
                     step = self.optimizer.iterations
                     learning_rate = self.schedule(step)
-                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                    if False:
+                        p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
                                                                             learning_rate))
             
         logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[10:])*1000.} +/- {np.std(times[10:])*1000.} ms")
