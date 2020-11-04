@@ -28,10 +28,11 @@ import subprocess
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'  # or any {'0', '1', '2'}
 # os.environ["TF_CPP_VMODULE"] = 'compilation_cache=2,gpu_backend_lib=2,nvptx_compiler=2,xla_compile_on_demand_op=2'
 # os.environ["TF_XLA_FLAGS"] = 'tf_xla_print_cluster_outputs=1'
+os.environ["TF_XLA_FLAGS"] = 'tf_enable_lazy_compilation=false,tf_xla_min_cluster_size=5'
 os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
 os.environ['TF_GPU_THREAD_COUNT'] = '1'
-os.environ["TF_NUM_INTRAOP_THREADS"]="7"
-os.environ["TF_NUM_INTEROP_THREADS"]="6"
+os.environ["TF_NUM_INTRAOP_THREADS"]="3"
+os.environ["TF_NUM_INTEROP_THREADS"]="9"
 
 
 #for k,v in os.environ.items():
@@ -118,13 +119,15 @@ def main(argv):
     RUN_CONFIG = mask_rcnn_params.default_config()
 
     temp_config = FLAGS.flag_values_dict()
-    for i,j in temp_config.items():
-        print("{}: {}".format(i,j))
+    
     temp_config['learning_rate_decay_levels'] = [float(decay) for decay in temp_config['learning_rate_decay_levels']]
     temp_config['learning_rate_levels'] = [
         decay * temp_config['init_learning_rate'] for decay in temp_config['learning_rate_decay_levels']
     ]
     temp_config['learning_rate_steps'] = [int(step) for step in temp_config['learning_rate_steps']]
+    if MPI_rank(is_herring()) == 0:
+        for i,j in temp_config.items():
+            print("{}: {}".format(i,j))
 
     RUN_CONFIG = params_io.override_hparams(RUN_CONFIG, temp_config)
     
