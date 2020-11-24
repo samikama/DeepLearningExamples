@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-BATCH_SIZE=1
-HOST_COUNT=1
+BATCH_SIZE=${BATCH_SIZE:-1}
+HOST_COUNT=${HOST_COUNT:-1}
 GPU_COUNT=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 NUM_GPUS=${NUM_GPUS:-${GPU_COUNT}}
 IMAGES=118287
@@ -33,6 +33,8 @@ EVAL_AFTER=${EVAL_AFTER:-0}
 ASYNC_EVAL=${ASYNC_EVAL:-0}
 USE_NVCOCO=${USE_NVCOCO:-1}
 TRAIN_MODE=${TRAIN_MODE:-"train"}
+USE_GBBP=${USE_GBBP:-1}
+USE_BBP=${USE_BBP:-0}
 #source activate mask_rcnn
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -67,8 +69,7 @@ fi
         --model_dir="$BASEDIR/../baseline_1x_tape" \
         --num_steps_per_eval=$STEP_PER_EPOCH \
         --warmup_learning_rate=0.000133 \
-        --warmup_steps=100 \
-        --global_gradient_clip_ratio=0.0 \
+        --warmup_steps=1800 \
         --total_steps=$TOTAL_STEPS \
         --l2_weight_decay=1e-4 \
         --train_batch_size=$BATCH_SIZE \
@@ -85,4 +86,6 @@ fi
         --use_ext=${USE_NVCOCO} \
         ${PROFILE_PATH} \
         --preprocessed_data=${PRECALC_DATASET} \
-        --use_custom_box_proposals_op | tee ${BASEDIR}/../baseline_1x/baseline_1x.log
+        --use_custom_box_proposals_op=${USE_GBBP} \
+        --use_batched_box_proposals_op=${USE_BBP} |tee ${BASEDIR}/../baseline_1x_tape/log.txt
+        

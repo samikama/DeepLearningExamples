@@ -358,33 +358,41 @@ def custom_multilevel_propose_rois(scores_outputs, box_outputs, all_anchors,
     concat_scores = []
     concat_anchors = []
     shapes = []
-
+    test_inputs = dict()
+    DumpInputs = False
     for level in levels:
-      b, h, w, c = box_outputs[level].get_shape().as_list()[0:4]
-      new_shape = tf.stack([b, -1, c])
-      concat_boxes.append(tf.reshape(box_outputs[level], shape=new_shape))
-      x = scores_outputs[level]
-      b, h, w, s = x.get_shape().as_list()[0:4]
-      new_shape = tf.stack([b, -1, s])
-      concat_scores.append(tf.reshape(x, shape=new_shape))
-      x = anchor_boxes[level]
-      concat_anchors.append(tf.reshape(x, shape=[-1, c]))
-      shapes.append(h * w)
-    level_shapes = tf.stack(shapes)
-    concat_boxes = tf.concat(concat_boxes, axis=1)
-    concat_scores = tf.concat(concat_scores, axis=1)
-    concat_anchors = tf.concat(concat_anchors, axis=0)
+      # b, h, w, c = box_outputs[level].get_shape().as_list()[0:4]
+      # new_shape = tf.stack([b, -1, c])
+      # concat_boxes.append(tf.reshape(box_outputs[level], shape=new_shape))
+
+      # x = scores_outputs[level]
+      # b, h, w, s = x.get_shape().as_list()[0:4]
+      # new_shape = tf.stack([b, -1, s])
+      # concat_scores.append(tf.reshape(x, shape=new_shape))
+      # x = anchor_boxes[level]
+      # concat_anchors.append(tf.reshape(x, shape=[-1, c]))
+      # shapes.append(h * w)
+      if DumpInputs:
+        test_inputs["boxes_%d" % level] = box_outputs[level].numpy()
+        test_inputs["scores_%d" % level] = scores_outputs[level].numpy()
+        test_inputs["anchors_%d" % level] = anchor_boxes[level].numpy()
+    # level_shapes = tf.stack(shapes)
+    # concat_boxes = tf.concat(concat_boxes, axis=1)
+    # concat_scores = tf.concat(concat_scores, axis=1)
+    # concat_anchors = tf.concat(concat_anchors, axis=0)
+    if DumpInputs:
+      # test_inputs["level_shapes"] = level_shapes.numpy()
+      # test_inputs["concat_boxes"] = concat_boxes.numpy()
+      # test_inputs["concat_anchors"] = concat_anchors.numpy()
+      # test_inputs["concat_scores"] = concat_scores.numpy()
+      test_inputs["image_info"] = image_info.numpy()
+    if DumpInputs:
+      # tf.print("Level shapes=", level_shapes, ", boxes=", tf.shape(concat_boxes),
+      #         ", scores=", tf.shape(concat_scores), ", anchors=",
+      #         tf.shape(concat_anchors), "anchor_2=", tf.shape(anchor_boxes[2]))
+      np.savez("TestInputs/test_input%s.npz" % time.perf_counter(),
+               **test_inputs)
     if False:
-      tf.print("Level shapes=", level_shapes, ", boxes=", tf.shape(concat_boxes),
-              ", scores=", tf.shape(concat_scores), ", anchors=",
-              tf.shape(concat_anchors), "anchor_2=", tf.shape(anchor_boxes[2]))
-      np.savez("test_input%s.npz" % time.perf_counter(),
-              level_shapes=level_shapes.numpy(),
-              concat_boxes=concat_boxes.numpy(),
-              concat_anchors=concat_anchors.numpy(),
-              concat_scores=concat_scores.numpy(),
-              image_info=image_info.numpy())
-    if True:
       # [MaskRCNN] INFO    : Rank=0 Avg step time 76.3695432673077 +/- 9.32809471455277 ms
       # [MaskRCNN] INFO    : Rank=0 Avg step time 76.29114838665058 +/- 7.260984060711662 ms
 
@@ -403,38 +411,44 @@ def custom_multilevel_propose_rois(scores_outputs, box_outputs, all_anchors,
       top_k_scores = tf.stop_gradient(batch_topk_scores)
       top_k_rois = tf.stop_gradient(batch_topk_boxes)
     else:
+
+      # 14700 steps single node horovod p3dn baremetal Loss: 1.5696, LR: 0.0080
+      # [1,0]<stdout>:[MaskRCNN] INFO    : Rank=0 Avg step time 77.52912726451073 +/- 7.576369394396495 ms
+      # [1,0]<stdout>:[MaskRCNN] INFO    : Rank=0 Avg step time 77.46914744173819 +/- 5.666387284954074 ms
+
       for level in levels:
-          # Expands the batch dimension for anchors as anchors do not have batch
-          # dimension. Note that batch_size is invariant across levels.
-          # batch_size = scores_outputs[level].shape[0]
-          # anchor_boxes_batch = tf.cast(
-          #   tf.tile(tf.expand_dims(anchor_boxes[level], axis=0),
-          #         [batch_size, 1, 1, 1]),
-          #   dtype=scores_outputs[level].dtype)
-          logging.debug("[ROI OPs] Using GenerateBoxProposals op... Scope: proposal_%s" % level)
+        # Expands the batch dimension for anchors as anchors do not have batch
+        # dimension. Note that batch_size is invariant across levels.
+        # batch_size = scores_outputs[level].shape[0]
+        # anchor_boxes_batch = tf.cast(
+        #   tf.tile(tf.expand_dims(anchor_boxes[level], axis=0),
+        #         [batch_size, 1, 1, 1]),
+        #   dtype=scores_outputs[level].dtype)
+        logging.debug(
+            "[ROI OPs] Using GenerateBoxProposals op... Scope: proposal_%s" %
+            level)
 
-          boxes_per_level, scores_per_level = tf.image.generate_bounding_box_proposals(
-              scores=tf.reshape(tf.sigmoid(scores_outputs[level]),
-                                scores_outputs[level].shape),
-              bbox_deltas=box_outputs[level],
-              image_info=image_info,
-              anchors=anchor_boxes[level],
-              pre_nms_topn=rpn_pre_nms_topn,
-              post_nms_topn=rpn_post_nms_topn,
-              nms_threshold=rpn_nms_threshold,
-              min_size=rpn_min_size,
-              name="proposal_%s" % level
-          )
+        boxes_per_level, scores_per_level = tf.image.generate_bounding_box_proposals(
+            scores=tf.reshape(tf.sigmoid(scores_outputs[level]),
+                              scores_outputs[level].shape),
+            bbox_deltas=box_outputs[level],
+            image_info=image_info,
+            anchors=anchor_boxes[level],
+            pre_nms_topn=rpn_pre_nms_topn,
+            post_nms_topn=rpn_post_nms_topn,
+            nms_threshold=rpn_nms_threshold,
+            min_size=rpn_min_size,
+            name="proposal_%s" % level)
 
-          # tf.print("Level ",level," boxes shape=",tf.shape(box_outputs[level]), ", scores shape=",tf.shape(scores_outputs[level]), ", anchor shapes=",tf.shape(anchor_boxes[level]), ", result_scores=",tf.shape(scores_per_level),", rois_per_level",tf.shape(boxes_per_level))
-          scores.append(scores_per_level)
-          rois.append(boxes_per_level)
+        # tf.print("Level ",level," boxes shape=",tf.shape(box_outputs[level]), ", scores shape=",tf.shape(scores_outputs[level]), ", anchor shapes=",tf.shape(anchor_boxes[level]), ", result_scores=",tf.shape(scores_per_level),", rois_per_level",tf.shape(boxes_per_level))
+        scores.append(scores_per_level)
+        rois.append(boxes_per_level)
 
-          # a,b=_proposal_op_per_level(
-          #     scores_outputs[level], box_outputs[level], anchor_boxes_batch,
-          #     image_info, rpn_pre_nms_topn, rpn_post_nms_topn, rpn_nms_threshold,
-          #     rpn_min_size, level)
-          # print("SAMI Orig,",a,b,"ours=",scores_per_level,boxes_per_level,rpn_min_size,anchor_boxes)
+        # a,b=_proposal_op_per_level(
+        #     scores_outputs[level], box_outputs[level], anchor_boxes_batch,
+        #     image_info, rpn_pre_nms_topn, rpn_post_nms_topn, rpn_nms_threshold,
+        #     rpn_min_size, level)
+        # print("SAMI Orig,",a,b,"ours=",scores_per_level,boxes_per_level,rpn_min_size,anchor_boxes)
       scores = tf.concat(scores, axis=1)
       rois = tf.concat(rois, axis=1)
       # sh=tf.shape(box_outputs[2])
@@ -445,19 +459,109 @@ def custom_multilevel_propose_rois(scores_outputs, box_outputs, all_anchors,
       # concat_anchors=tf.concat([tf.reshape(x,shape=[-1,tf.shape(x)[2]]) for x in anchor_boxes.values()],axis=1)
       # tf.print("Concat boxes shape=",tf.shape(concat_boxes), ", scores shape=",tf.shape(concat_scores), ", anchor shapes=",tf.shape(concat_anchors), ", result_scores=",tf.shape(scores_per_level),", rois_per_level",tf.shape(boxes_per_level))
       with tf.name_scope('post_nms_topk'):
-          # Selects the top-k rois, k being rpn_post_nms_topn or the number of total
-          # anchors after non-max suppression.
-          post_nms_num_anchors = scores.shape[1]
+        # Selects the top-k rois, k being rpn_post_nms_topn or the number of total
+        # anchors after non-max suppression.
+        post_nms_num_anchors = scores.shape[1]
 
-          post_nms_topk_limit = (
-              post_nms_num_anchors if post_nms_num_anchors < rpn_post_nms_topn
-              else rpn_post_nms_topn
-          )
+        post_nms_topk_limit = (post_nms_num_anchors
+                               if post_nms_num_anchors < rpn_post_nms_topn else
+                               rpn_post_nms_topn)
 
-          top_k_scores, top_k_rois = box_utils.top_k(scores, k=post_nms_topk_limit, boxes_list=[rois])
-          top_k_rois = top_k_rois[0]
+        top_k_scores, top_k_rois = box_utils.top_k(scores,
+                                                   k=post_nms_topk_limit,
+                                                   boxes_list=[rois])
+        top_k_rois = top_k_rois[0]
 
       top_k_scores = tf.stop_gradient(top_k_scores)
       top_k_rois = tf.stop_gradient(top_k_rois)
 
     return top_k_scores, top_k_rois
+
+
+def batched_multilevel_proposals(scores_outputs, box_outputs, all_anchors,
+                                 image_info, rpn_pre_nms_topn,
+                                 rpn_post_nms_topn, rpn_nms_threshold,
+                                 rpn_min_size, with_legacy_offset=False):
+  """Proposes RoIs for the second stage nets.
+
+    This proposal op performs the following operations.
+    1. propose rois at each level.
+    2. collect all proposals.
+    3. keep rpn_post_nms_topn proposals by their sorted scores from the highest
+       to the lowest.
+
+    Reference:
+    https://github.com/facebookresearch/Detectron/blob/master/detectron/ops/collect_and_distribute_fpn_rpn_proposals.py
+
+    Args:
+    scores_outputs: an OrderDict with keys representing levels and values
+      representing logits in [batch_size, height, width, num_anchors].
+    box_outputs: an OrderDict with keys representing levels and values
+      representing box regression targets in
+      [batch_size, height, width, num_anchors * 4]
+    all_anchors: an Anchors object that contains the all anchors.
+    image_info: a tensor of shape [batch_size, 5] where the three columns
+      encode the input image's [height, width, scale,
+      original_height, original_width]. Height and width are for
+      the input to the network, not the original image; scale is the scale
+      factor used to scale the network input size to the original image size.
+      See dataloader.DetectionInputProcessor for details. The last two are
+      original height and width. See dataloader.DetectionInputProcessor for
+      details.
+    rpn_pre_nms_topn: a integer number of top scoring RPN proposals to keep
+      before applying NMS. This is *per FPN level* (not total).
+    rpn_post_nms_topn: a integer number of top scoring RPN proposals to keep
+      after applying NMS. This is the total number of RPN proposals produced.
+    rpn_nms_threshold: a float number between 0 and 1 as the NMS threshold
+      used on RPN proposals.
+    rpn_min_size: a integer number as the minimum proposal height and width as
+      both need to be greater than this number. Note that this number is at
+      origingal image scale; not scale used during training or inference).
+    with_legacy_offset: Use +/- 1.0 offset while decoding the boxes as used 
+      in python based implementation
+    Returns:
+    scores: a tensor with a shape of [batch_size, rpn_post_nms_topn, 1]
+      representing the scores of the proposals.
+    rois: a tensor with a shape of [batch_size, rpn_post_nms_topn, 4]
+      representing the boxes of the proposals. The boxes are in normalized
+      coordinates with a form of [ymin, xmin, ymax, xmax].
+    """
+  with tf.name_scope('batched_proposal'):
+    levels = scores_outputs.keys()
+    anchor_boxes = all_anchors.get_unpacked_boxes()
+    concat_boxes = []
+    concat_scores = []
+    concat_anchors = []
+    shapes = []
+    for level in levels:
+      b, h, w, c = box_outputs[level].get_shape().as_list()
+      new_shape = tf.stack([b, -1, c])
+      concat_boxes.append(tf.reshape(box_outputs[level], shape=new_shape))
+      x = scores_outputs[level]
+      b, h, w, s = x.get_shape().as_list()
+      new_shape = tf.stack([b, -1, s])
+      concat_scores.append(tf.reshape(x, shape=new_shape))
+      x = anchor_boxes[level]
+      concat_anchors.append(tf.reshape(x, shape=[-1, c]))
+      shapes.append(h * w)
+    level_shapes = tf.stack(shapes)
+    concat_boxes = tf.concat(concat_boxes, axis=1)
+    concat_scores = tf.concat(concat_scores, axis=1)
+    # anchors are the same for all batch entries for fixed input size
+    concat_anchors = tf.concat(concat_anchors, axis=0)
+    logging.debug("[ROI OPs] Using BatchedBoxProposals op..")
+    batch_topk_boxes, batch_topk_scores = tf.image.batched_box_proposals(
+        scores=tf.reshape(tf.sigmoid(concat_scores), concat_scores.shape),
+        bbox_deltas=concat_boxes,
+        image_info=image_info,
+        anchors=concat_anchors,
+        entries_per_level=level_shapes,
+        pre_nms_topn=rpn_pre_nms_topn,
+        post_nms_topn=rpn_post_nms_topn,
+        nms_threshold=rpn_nms_threshold,
+        min_size=rpn_min_size,
+        use_legacy_offset=with_legacy_offset,
+        name="Batched_proposal")
+    top_k_scores = tf.stop_gradient(batch_topk_scores)
+    top_k_rois = tf.stop_gradient(batch_topk_boxes)
+  return top_k_scores, top_k_rois

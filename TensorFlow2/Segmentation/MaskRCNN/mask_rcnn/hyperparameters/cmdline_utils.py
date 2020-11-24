@@ -236,6 +236,12 @@ def define_hparams_flags():
         help='Use GenerateBoundingBoxProposals op.'
     )
 
+    flags.DEFINE_bool(
+        'use_batched_box_proposals_op',
+        default=False,
+        help='Use batched box proposals op.'
+    )
+
     flags.DEFINE_bool('use_fake_data', False, 'Use fake input.')
 
     flags.DEFINE_bool(

@@ -246,7 +246,7 @@ class MRCNN(tf.keras.Model):
                                                 trainable=is_training,
                                                 name="mask_head"
                                             )
-    def call(self, features, labels, params, is_training=True):
+    def call(self, features, labels, params, is_training=True,debugBBP=False):
         model_outputs = {}
         is_gpu_inference = not is_training and params['use_batched_nms']
         batch_size, image_height, image_width, _ = features['images'].get_shape().as_list()
@@ -276,9 +276,19 @@ class MRCNN(tf.keras.Model):
             rpn_pre_nms_topn = params['test_rpn_pre_nms_topn']
             rpn_post_nms_topn = params['test_rpn_post_nms_topn']
             rpn_nms_threshold = params['test_rpn_nms_thresh']
+        if debugBBP:
+            model_outputs.update({
+                'scores':rpn_score_outputs,
+                'boxes':rpn_box_outputs,
+                'anchors':all_anchors.get_unpacked_boxes(),
+                'image_info':features['image_info']
+            })
 
         if params['use_custom_box_proposals_op']:
-            rpn_box_scores, rpn_box_rois = roi_ops.custom_multilevel_propose_rois(
+            roi_proposal_op=roi_ops.custom_multilevel_propose_rois
+            if params["use_batched_box_proposals_op"]:
+                roi_proposal_op=roi_ops.batched_multilevel_proposals
+            rpn_box_scores, rpn_box_rois = roi_proposal_op(
                 scores_outputs=rpn_score_outputs,
                 box_outputs=rpn_box_outputs,
                 all_anchors=all_anchors,
@@ -883,7 +893,7 @@ class TapeModel(object):
                             if eval_input_fn else None
         self.optimizer, self.schedule = self.get_optimizer()
         self.epoch_num = 0
-
+        self.epoch_ctr=0
     def load_weights(self):
         chkp = tf.compat.v1.train.NewCheckpointReader(self.params.checkpoint)
         weights = [chkp.get_tensor(i) for i in eager_mapping.resnet_vars]
@@ -921,10 +931,15 @@ class TapeModel(object):
 
 
     @tf.function
-    def train_step(self, features, labels, sync_weights=False, sync_opt=False):
+    def train_step(self, features, labels, sync_weights=False, sync_opt=False,debugBBP=False):
         loss_dict = dict()
         with tf.GradientTape() as tape:
-            model_outputs = self.forward(features, labels, self.params.values(), True)
+            model_outputs = self.forward(features, labels, self.params.values(), True,debugBBP=debugBBP)
+            if debugBBP:
+                loss_dict['bbscores']=model_outputs['scores']
+                loss_dict['bbboxes']=model_outputs['boxes']
+                loss_dict['bbanchors']=model_outputs['anchors']
+                loss_dict['bbimage_info']=model_outputs['image_info']
             loss_dict['total_rpn_loss'], loss_dict['rpn_score_loss'], \
                 loss_dict['rpn_box_loss'] = losses.rpn_loss(
                     score_outputs=model_outputs['rpn_score_outputs'],
@@ -1040,9 +1055,14 @@ class TapeModel(object):
         self.load_weights()
     
     def train_epoch(self, steps, broadcast=False, profile=None):
+        debug_BBP=False
+
         if MPI_rank(is_herring())==0:
-            logging.info("Starting training loop")
-            p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+            logging.info("Starting training loop for {} steps".format(steps))
+            if debug_BBP:
+                p_bar = tqdm(range(steps), bar_format='DebugDump {l_bar}{bar:10}{r_bar}{bar:-10b}')
+            else: 
+                p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             loss_history = []
         else:
             p_bar = range(steps)
@@ -1090,18 +1110,34 @@ class TapeModel(object):
                 features, labels = next(self.train_tdf)
                 b_w = tf.convert_to_tensor(b_w)
                 b_o = tf.convert_to_tensor(b_o)
-                loss_dict = self.train_step(features, labels, b_w, b_o)
+                loss_dict = self.train_step(features, labels, b_w, b_o,debugBBP=debug_BBP)
                 times.append(time.perf_counter()-tstart)
                 nvtx.pop(step_token)
+                if debug_BBP:
+                    test_inputs={}
+                    scores=loss_dict['bbscores']
+                    boxes=loss_dict['bbboxes']
+                    anchors=loss_dict['bbanchors']
+                    levels=scores.keys()
+                    for level in levels:
+                        test_inputs["boxes_%d" % level] = boxes[level].numpy()
+                        test_inputs["scores_%d" % level] = scores[level].numpy()
+                        test_inputs["anchors_%d" % level] = anchors[level].numpy()
+                    test_inputs['image_info']=loss_dict['bbimage_info']
+                    np.savez_compressed("/work/sami/BBPTestInputs/test_input%s.npz" % time.perf_counter(),
+                        **test_inputs)
                 if MPI_rank(is_herring())==0:
                     loss_history.append(loss_dict['total_loss'].numpy())
                     step = self.optimizer.iterations
                     learning_rate = self.schedule(step)
                     p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
                                                                             learning_rate))
-            
-        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[10:])*1000.} +/- {np.std(times[10:])*1000.} ms")
-        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[500:])*1000.} +/- {np.std(times[500:])*1000.} ms")
+
+        logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times)*1000.} +/- {np.std(times)*1000.} ms")            
+        logging.info(f"Rank={MPI_rank()} Avg step time[1:] {np.mean(times[1:])*1000.} +/- {np.std(times[1:])*1000.} ms")
+        logging.info(f"Rank={MPI_rank()} Avg step time[2:] {np.mean(times[2:])*1000.} +/- {np.std(times[2:])*1000.} ms")
+        logging.info(f"Rank={MPI_rank()} Avg step time[3:] {np.mean(times[3:])*1000.} +/- {np.std(times[3:])*1000.} ms")
+        self.epoch_ctr+=1
         if MPI_rank(is_herring()) == 0:
             if self.epoch_num == 16:
                 print(f'Total time is {time.time() - st}')

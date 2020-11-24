@@ -48,18 +48,18 @@ def train_and_eval(run_config, train_input_fn, eval_input_fn):
     mrcnn_model = TapeModel(run_config, train_input_fn, eval_input_fn)
     mrcnn_model.initialize_model()
     eval_workers = min(MPI_size(is_herring()), 32)
-    
+    logging.info("Total Epochs to run={} num steps per epoch= {}".format(total_epochs,run_config.num_steps_per_eval))
     if run_config.offload_eval:
         for epoch in range(run_config.first_eval, total_epochs):
             if MPI_rank(is_herring())==0:
-                logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.num_steps_per_eval, broadcast=epoch==0)
+                logging.info("Starting epoch SAMI {} of {}".format(epoch+1, total_epochs))
+            mrcnn_model.train_epoch(min(run_config.total_steps,run_config.num_steps_per_eval), broadcast=epoch==0)
     
     else:
-        for epoch in range(1):
+        for epoch in range(total_epochs):
             if MPI_rank(is_herring())==0:
-                logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))
-            mrcnn_model.train_epoch(run_config.total_steps, broadcast=epoch==0)
+                logging.info("Starting epoch Sami {} of {}".format(epoch+1, total_epochs))
+            mrcnn_model.train_epoch(min(run_config.total_steps,run_config.num_steps_per_eval), broadcast=epoch==0)
         #for epoch in range(run_config.first_eval, total_epochs):
         #    if MPI_rank(is_herring())==0:
         #        logging.info("Starting epoch {} of {}".format(epoch+1, total_epochs))

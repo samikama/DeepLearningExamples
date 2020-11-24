@@ -31,14 +31,18 @@ os.environ["TF_CPP_VMODULE"] = 'non_max_suppression_op=0,generate_box_proposals_
 os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
 os.environ['TF_GPU_THREAD_COUNT'] = '1'
 os.environ["TF_NUM_INTRAOP_THREADS"]="7"
-os.environ["TF_NUM_INTEROP_THREADS"]="6"
+os.environ["TF_NUM_INTEROP_THREADS"]="9"
 os.environ["ENABLE_NVTX_MARKERS"]="0"
-
+# TF_AUTO_MIXED_PRECISION_GRAPH_REWRITE_XXX_OOO where XXX is ["WHITELIST","GRAYLIST","BLACKLIST","CLEARLIST"] and OOO is ["ADD", "REMOVE"]
+# list is op name with comma separators
+#os.environ["TF_AUTO_MIXED_PRECISION_GRAPH_REWRITE_WHITELIST_ADD"]= "BatchedBoxProposals,ROIAlign,ROIAlignGrad"
 from absl import app
 
 import tensorflow as tf
 #from tensorflow.python.framework.ops import disable_eager_execution
-#tf.config.run_functions_eagerly(True)
+
+# tf.config.run_functions_eagerly(True)
+
 from mask_rcnn.utils.herring_env import is_herring
 
 if is_herring():
